@@ -1,0 +1,20 @@
+[
+  {
+    "itemName": "cgwa_name_left",
+    "roiFront": "425,190,185,335",
+    "roiBack": "425,190,185,335",
+    "mode": "Full",
+    "method": "Default",
+    "keyword": "",
+    "description": "分享弹窗左列四张好友卡片的名字区（已避开左侧 60 级标记），用于按名字查找指定好友"
+  },
+  {
+    "itemName": "cgwa_name_right",
+    "roiFront": "715,190,175,335",
+    "roiBack": "715,190,175,335",
+    "mode": "Full",
+    "method": "Default",
+    "keyword": "",
+    "description": "分享弹窗右列四张好友卡片的名字区（已避开左侧 60 级标记），用于按名字查找指定好友"
+  }
+]

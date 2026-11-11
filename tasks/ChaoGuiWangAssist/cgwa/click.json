@@ -1,0 +1,32 @@
+[
+  {
+    "itemName": "cgwa_share_invite",
+    "roiFront": "714,549,122,50",
+    "roiBack": "714,549,122,50",
+    "description": "鬼王分享弹窗右下角的「邀请」按钮中心区域"
+  },
+  {
+    "itemName": "cgwa_share_tab_friend",
+    "roiFront": "376,97,60,37",
+    "roiBack": "376,97,60,37",
+    "description": "鬼王分享弹窗左上角的「好友」页签"
+  },
+  {
+    "itemName": "cgwa_share_tab_guild",
+    "roiFront": "494,100,58,34",
+    "roiBack": "494,100,58,34",
+    "description": "鬼王分享弹窗顶部第二个「寮友」页签，好友页签找不到目标时切到这里"
+  },
+  {
+    "itemName": "cgwa_share_card_1",
+    "roiFront": "430,190,120,40",
+    "roiBack": "430,190,120,40",
+    "description": "分享弹窗左上角第一张好友卡片的名字区域，未指定好友名或找不到目标时的兜底选择"
+  },
+  {
+    "itemName": "cgwa_card_friend",
+    "roiFront": "50,370,80,70",
+    "roiBack": "50,370,80,70",
+    "description": "「好友发现」鬼王卡片左侧的头像区域，点击后右侧会显示该鬼王详情与挑战按钮"
+  }
+]

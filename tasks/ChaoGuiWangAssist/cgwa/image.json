@@ -1,0 +1,47 @@
+[
+  {
+    "itemName": "cgwa_gather_self",
+    "imageName": "cgwa_gather_self.png",
+    "roiFront": "234,145,77,73",
+    "roiBack": "195,125,160,130",
+    "method": "Template matching",
+    "threshold": 0.75,
+    "description": "「自己发现」鬼王卡片右上角的「集结」印章；只在卡片出现后才有，用于确认召唤成功并作为打开分享弹窗的入口"
+  },
+  {
+    "itemName": "cgwa_public",
+    "imageName": "cgwa_public.png",
+    "roiFront": "237,384,77,73",
+    "roiBack": "195,350,160,140",
+    "method": "Template matching",
+    "threshold": 0.75,
+    "description": "「好友发现」鬼王卡片右上角的「已公开」印章，命中表示该鬼王已公开、按需求忽略不打"
+  },
+  {
+    "itemName": "cgwa_friend_card",
+    "imageName": "cgwa_friend_card.png",
+    "roiFront": "143,402,90,30",
+    "roiBack": "120,350,240,180",
+    "method": "Template matching",
+    "threshold": 0.8,
+    "description": "「好友发现」鬼王卡片上的「剩余时间」标签，用于判定该区域确实存在一张鬼王卡片（卡片没有集结印章，只有已公开印章或什么都没有）；搜索区只覆盖下半部分，避免命中自己发现卡片的同一标签"
+  },
+  {
+    "itemName": "cgwa_friend_mask",
+    "imageName": "cgwa_friend_mask.png",
+    "roiFront": "132,427,91,103",
+    "roiBack": "60,390,240,210",
+    "method": "Template matching",
+    "threshold": 0.85,
+    "description": "「好友发现」区域的鬼面空位图标（截图「暂无好友发现鬼王」），出现即表示当前没有可协战的好友鬼王；搜索区只覆盖下半部分，避免命中「自己发现」的同款鬼面"
+  },
+  {
+    "itemName": "cgwa_share",
+    "imageName": "cgwa_share.png",
+    "roiFront": "443,548,124,52",
+    "roiBack": "420,528,180,80",
+    "method": "Template matching",
+    "threshold": 0.85,
+    "description": "鬼王分享弹窗底部左侧的「公开」按钮，是分享弹窗独有的标识（组队邀请界面同位置只有取消/邀请），命中即判定分享弹窗已打开"
+  }
+]

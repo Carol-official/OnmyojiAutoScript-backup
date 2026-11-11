@@ -254,6 +254,7 @@
 	<message><source>Tako</source><translation>石距</translation></message>
 	<message><source>AutoCheckinBigGod</source><translation>大神签到</translation></message>
 	<message><source>ChaoGuiWang</source><translation>超鬼王·祸主降临</translation></message>
+	<message><source>ChaoGuiWangAssist</source><translation>超鬼王协战</translation></message>
 </context>
 <context>
     <name>Args</name>
@@ -274,6 +275,15 @@
 	<message><source>Notify Count Cleared</source><translation>打完所设置数量的鬼王时推送</translation></message>
 	<message><source>Notify Fatigue Limit</source><translation>超过疲劳阈值时推送</translation></message>
 	<message><source>Notify Defeat Limit</source><translation>连续挑战失败时推送</translation></message>
+	<message><source>Mode</source><translation>运行模式</translation></message>
+	<message><source>Share Friend Name</source><translation>分享好友名</translation></message>
+	<message><source>Wait Interval</source><translation>检查间隔(秒)</translation></message>
+	<message><source>Wait Timeout</source><translation>最长等待(秒)</translation></message>
+	<message><source>Click Delay Min</source><translation>点击前等待下限(秒)</translation></message>
+	<message><source>Click Delay Max</source><translation>点击前等待上限(秒)</translation></message>
+	<message><source>Notify No Assist</source><translation>无协战鬼王时推送</translation></message>
+	<message><source>Notify Invite Timeout</source><translation>邀请超时时推送</translation></message>
+	<message><source>Notify Summary</source><translation>任务汇总推送</translation></message>
 	<message>
         <source>Setting</source>
         <translation>设置</translation>

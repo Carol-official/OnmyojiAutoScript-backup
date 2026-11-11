@@ -63,6 +63,7 @@ from tasks.KittyShop.config import KittyShop
 from tasks.DyeTrials.config import DyeTrials
 from tasks.BudokaiTournament.config import BudokaiTournament
 from tasks.ChaoGuiWang.config import ChaoGuiWang
+from tasks.ChaoGuiWangAssist.config import ChaoGuiWangAssist
 # ----------------------------------------------------------------------------------------------------------------------
 
 # 肝帝专属---------------------------------------------------------------------------------------------------------------
@@ -129,6 +130,7 @@ class ConfigModel(ConfigBase):
     kitty_shop: KittyShop = Field(default_factory=KittyShop)
     dye_trials: DyeTrials = Field(default_factory=DyeTrials)
     chao_gui_wang: ChaoGuiWang = Field(default_factory=ChaoGuiWang)
+    chao_gui_wang_assist: ChaoGuiWangAssist = Field(default_factory=ChaoGuiWangAssist)
 
     # 这些是肝帝专属
     bondling_fairyland: BondlingFairyland = Field(default_factory=BondlingFairyland)
