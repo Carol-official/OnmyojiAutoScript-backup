@@ -1,0 +1,11 @@
+[
+  {
+    "itemName": "cgw_fatigue",
+    "roiFront": "1114,24,94,31",
+    "roiBack": "1114,24,94,31",
+    "mode": "DigitCounter",
+    "method": "Default",
+    "keyword": "",
+    "description": "屏幕右上角疲劳度，形如 25/100"
+  }
+]

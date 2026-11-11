@@ -1,0 +1,56 @@
+[
+  {
+    "itemName": "cgw_entry",
+    "imageName": "cgw_cgw_entry.png",
+    "roiFront": "1170,200,90,80",
+    "roiBack": "1120,150,160,220",
+    "method": "Template matching",
+    "threshold": 0.75,
+    "description": "庭院右侧超鬼王活动入口图标"
+  },
+  {
+    "itemName": "cgw_huozhu",
+    "imageName": "cgw_cgw_huozhu.png",
+    "roiFront": "890,55,70,215",
+    "roiBack": "830,20,220,300",
+    "method": "Template matching",
+    "threshold": 0.75,
+    "description": "活动主界面祸主降临竖排文字"
+  },
+  {
+    "itemName": "cgw_demon_icon",
+    "imageName": "cgw_cgw_demon_icon.png",
+    "roiFront": "145,140,68,76",
+    "roiBack": "100,110,230,160",
+    "method": "Template matching",
+    "threshold": 0.8,
+    "description": "自己发现区域的鬼面图标，用于判定第3步界面已就绪"
+  },
+  {
+    "itemName": "cgw_summon",
+    "imageName": "cgw_cgw_summon.png",
+    "roiFront": "1125,575,110,110",
+    "roiBack": "1080,540,200,180",
+    "method": "Template matching",
+    "threshold": 0.8,
+    "description": "右下角召唤鬼王按钮"
+  },
+  {
+    "itemName": "cgw_challenge",
+    "imageName": "cgw_cgw_challenge.png",
+    "roiFront": "1125,575,110,80",
+    "roiBack": "1080,540,200,180",
+    "method": "Template matching",
+    "threshold": 0.8,
+    "description": "右下角挑战按钮"
+  },
+  {
+    "itemName": "cgw_settle",
+    "imageName": "cgw_cgw_settle.png",
+    "roiFront": "690,40,300,160",
+    "roiBack": "550,0,650,260",
+    "method": "Template matching",
+    "threshold": 0.75,
+    "description": "鬼王战斗结束后的胜利结算界面"
+  }
+]

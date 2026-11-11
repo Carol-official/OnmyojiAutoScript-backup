@@ -166,5 +166,14 @@
   "green_mark_type": "绿标匹配方式",
   "green_mark_type_help": "按坐标点击指定绿标，或按式神名OCR 匹配后点击",
   "green_mark_name": "绿标式神名称",
-  "green_mark_name_help": "仅当绿标按式神名匹配时生效，填写目标式神名"
+  "green_mark_name_help": "仅当绿标按式神名匹配时生效，填写目标式神名",
+  "ChaoGuiWang": "超鬼王·祸主降临",
+  "kill_count": "击杀超鬼王数量",
+  "kill_count_help": "完成一次完整的召唤到结算流程计一只，达到该数量后推送并结束任务",
+  "fatigue_limit": "疲劳度阈值",
+  "fatigue_limit_help": "疲劳度上限为100，当前值超过该阈值时推送并停止任务",
+  "wait_icon_timeout": "等待鬼面图标超时(秒)",
+  "wait_icon_interval": "鬼面图标检查间隔(秒)",
+  "battle_timeout": "单场战斗超时(秒)",
+  "max_consecutive_timeout": "连续超时上限"
 }

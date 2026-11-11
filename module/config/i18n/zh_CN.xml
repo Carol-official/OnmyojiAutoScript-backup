@@ -253,9 +253,16 @@
 	<message><source>WantedQuests</source><translation>悬赏封印</translation></message>
 	<message><source>Tako</source><translation>石距</translation></message>
 	<message><source>AutoCheckinBigGod</source><translation>大神签到</translation></message>
+	<message><source>ChaoGuiWang</source><translation>超鬼王·祸主降临</translation></message>
 </context>
 <context>
     <name>Args</name>
+	<message><source>Kill Count</source><translation>击杀超鬼王数量</translation></message>
+	<message><source>Fatigue Limit</source><translation>疲劳度阈值</translation></message>
+	<message><source>Wait Icon Timeout</source><translation>等待鬼面图标超时(秒)</translation></message>
+	<message><source>Wait Icon Interval</source><translation>鬼面图标检查间隔(秒)</translation></message>
+	<message><source>Battle Timeout</source><translation>单场战斗超时(秒)</translation></message>
+	<message><source>Max Consecutive Timeout</source><translation>连续超时上限</translation></message>
 	<message>
         <source>Setting</source>
         <translation>设置</translation>

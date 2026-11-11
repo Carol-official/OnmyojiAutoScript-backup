@@ -1,0 +1,32 @@
+[
+  {
+    "itemName": "cgw_huozhu_click",
+    "roiFront": "900,70,45,180",
+    "roiBack": "900,70,45,180",
+    "description": "祸主降临文字的点击区域"
+  },
+  {
+    "itemName": "cgw_bottom_button",
+    "roiFront": "1100,560,155,140",
+    "roiBack": "1100,560,155,140",
+    "description": "右下角召唤鬼王与挑战按钮的统一点击区域"
+  },
+  {
+    "itemName": "cgw_settle_left",
+    "roiFront": "15,35,250,390",
+    "roiBack": "15,35,250,390",
+    "description": "结算界面用户标注的左侧可点击区域"
+  },
+  {
+    "itemName": "cgw_settle_right",
+    "roiFront": "1040,70,220,415",
+    "roiBack": "1040,70,220,415",
+    "description": "结算界面用户标注的右侧可点击区域"
+  },
+  {
+    "itemName": "cgw_settle_bottom",
+    "roiFront": "50,605,1150,85",
+    "roiBack": "50,605,1150,85",
+    "description": "结算界面用户标注的下方可点击区域"
+  }
+]
