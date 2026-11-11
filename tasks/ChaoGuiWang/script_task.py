@@ -72,8 +72,14 @@ RECOVER_REWARD_LIMIT = 5        # 最多连续关多少次奖励弹窗，避免�
 # 召唤鬼王界面「全部队列」左侧的圆形图标，下方是一排橙色勾玉，
 # 亮起来的勾玉个数就是鬼王星级；勾玉间距固定 8px，起点也固定。
 STAR_ROW_ROI = (1058, 526, 58, 17)
-# 实测 1~6 星分别对应 33/55/82/108/137/162 个橙色像素，每多一星约多 26 个，
-# 取整后余量充足；低于该基数一半认为没有勾玉。
+# 主判据是「橙色像素的横向跨度」：第 n 颗勾玉的右边缘固定在 8n-2 像素处，
+# 因此 span = 8n-2，与亮度无关。实测 1~6 星的跨度是 6/14/22/28/36/44，
+# 对应 rank = round((span+2)/8)，对 ±20 的亮度扰动仍然全部判对。
+STAR_PILL_PITCH = 8.0
+STAR_PILL_SPAN_OFFSET = 2.0
+STAR_COLUMN_MIN = 3            # 一列至少有这么多橙色像素才算勾玉本体，过滤光晕
+# 面积只做交叉校验：实测 1~6 星约 33/55/82/108/137/162 像素，每星约 26 个。
+# 光晕脉冲会让面积整体抬高（曾把 4 星算成 5 星），所以不能作为主判据。
 STAR_ORANGE_PER_RANK = 26.5
 STAR_ORANGE_MIN = 12
 # 圆形图标本体，门票打空时这里会变成金色鬼面具，且下方没有橙色勾玉
@@ -281,8 +287,10 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
         """数圆形图标下方亮起的橙色勾玉，几个勾玉就是几星。
 
         返回 1~6；返回 0 表示没有检测到勾玉（门票打空，或是界面还没加载好）。
-        用像素面积换算而不是逐个数连通域：低星级时勾玉之间会粘连，
-        连通域个数会少算，而面积随星级单调线性增长，实测余量约 ±0.8 个点。
+
+        判据用「橙色像素的横向跨度」而不是像素面积：勾玉按 8px 固定间距排布，
+        跨度只取决于点亮了几颗，和光晕强弱无关；面积会被图标弹出时的辉光
+        整体抬高（实机曾把 4 星读成 5 星）。面积只用来交叉校验并写日志。
         """
         hsv = self._hsv(STAR_ROW_ROI)
         orange = ((hsv[..., 0] >= 5) & (hsv[..., 0] <= 28) &
@@ -290,7 +298,16 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
         pixels = int(orange.sum())
         if pixels < STAR_ORANGE_MIN:
             return 0
-        rank = int(round(pixels / STAR_ORANGE_PER_RANK))
+        columns = [i for i, count in enumerate(orange.sum(axis=0))
+                   if count >= STAR_COLUMN_MIN]
+        if not columns:
+            return 0
+        span = columns[-1] - columns[0] + 1
+        rank = int(round((span + STAR_PILL_SPAN_OFFSET) / STAR_PILL_PITCH))
+        area_rank = int(round(pixels / STAR_ORANGE_PER_RANK))
+        if area_rank != rank:
+            logger.info(f'星级跨度法判定 {rank} 星（跨度 {span}px），'
+                        f'面积法给出 {area_rank} 星（橙色 {pixels}px），以跨度法为准')
         return max(1, min(6, rank))
 
     def is_ticket_empty(self) -> bool:
