@@ -2,20 +2,20 @@
   {
     "itemName": "cgw_entry",
     "imageName": "cgw_cgw_entry.png",
-    "roiFront": "1170,200,90,80",
-    "roiBack": "1120,150,160,220",
+    "roiFront": "1186,220,38,38",
+    "roiBack": "1160,200,100,90",
     "method": "Template matching",
-    "threshold": 0.5,
-    "description": "庭院右侧超鬼王活动入口图标（动画帧A，阈值调低以应对光效变化）"
+    "threshold": 0.7,
+    "description": "庭院右侧超鬼王圆形图标内部的蓝色法阵核心（不含金边、飘带、竖排文字与光效，动画帧A）"
   },
   {
     "itemName": "cgw_entry_alt",
     "imageName": "cgw_cgw_entry_alt.png",
-    "roiFront": "1170,200,90,80",
-    "roiBack": "1120,150,160,220",
+    "roiFront": "1186,220,38,38",
+    "roiBack": "1160,200,100,90",
     "method": "Template matching",
-    "threshold": 0.5,
-    "description": "庭院右侧超鬼王活动入口图标（动画帧B）"
+    "threshold": 0.7,
+    "description": "超鬼王圆形图标内部蓝色法阵核心（动画帧B，作为核心区域的兜底帧）"
   },
   {
     "itemName": "cgw_huozhu",

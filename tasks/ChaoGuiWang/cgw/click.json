@@ -1,9 +1,9 @@
 [
   {
     "itemName": "cgw_entry_click",
-    "roiFront": "1160,215,60,60",
-    "roiBack": "1160,215,60,60",
-    "description": "庭院右侧超鬼王图标主体的固定点击区域"
+    "roiFront": "1188,222,32,32",
+    "roiBack": "1188,222,32,32",
+    "description": "庭院右侧超鬼王圆形图标的圆心法阵区域，完全落在圆形按钮内，避免点到图标外侧"
   },
   {
     "itemName": "cgw_huozhu_click",

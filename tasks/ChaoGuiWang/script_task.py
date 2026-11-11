@@ -81,8 +81,10 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
     def cgw_entry_visible(self) -> bool:
         """庭院右侧是否存在超鬼王图标。
 
-        该图标带持续光效动画，单帧模板分数会在 0.62~0.96 间波动，
-        因此用两个不同动画帧的模板，任一命中即认为图标存在。
+        模板只取圆形图标内部的蓝色法阵核心（38x38），不含会随动画变化的
+        金色外圈、飘带、竖排文字和光晕。五张不同帧的实机截图上分数稳定在
+        0.95 以上，其它界面最高仅 0.39，因此阈值可以提到 0.7。
+        仍保留两个不同帧的核心模板作为兜底，任一命中即认为图标存在。
         """
         return self.appear(self.I_CGW_ENTRY) or self.appear(self.I_CGW_ENTRY_ALT)
 
