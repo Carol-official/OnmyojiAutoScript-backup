@@ -356,6 +356,30 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
         """用户绿框标注的三处结算可点击区域，胜利与失败界面通用。"""
         return [self.C_CGW_SETTLE_LEFT, self.C_CGW_SETTLE_RIGHT, self.C_CGW_SETTLE_BOTTOM]
 
+    def wait_before_click(self, label: str, delay: tuple = BEFORE_CLICK_DELAY) -> float:
+        """点击前插入一段随机等待，默认 1.5~3 秒。
+
+        结算界面的「胜利 / 失败」文字与淡入动画还没定格时点击会被游戏吞掉，
+        点得太快就会一直停在结算界面，因此统一在点击前随机等一会儿，
+        并把实际等待时长写进日志，方便事后复盘节奏是否合适。
+        """
+        wait = random.uniform(delay[0], delay[1])
+        logger.info(f'点击{label}前随机等待 {wait:.2f} 秒')
+        sleep(wait)
+        return wait
+
+    def settle_finished(self) -> bool:
+        """结算界面是否已经关掉、回到可以继续操作的界面。
+
+        以「结算模板都不在 + 挑战/召唤/鬼面图标任一出现」为准，
+        不引用 I_WIN，避免残留的胜利图标把已关闭的界面判成还在结算。
+        """
+        if self.appear(self.I_CGW_SETTLE) or self.appear(self.I_CGW_SETTLE_FAIL):
+            return False
+        return (self.appear(self.I_CGW_CHALLENGE)
+                or self.appear(self.I_CGW_SUMMON)
+                or self.appear(self.I_CGW_DEMON_ICON))
+
     def click_stage(self, image, action=None, timeout: int = 20,
                     stable: int = 1, delay: float = 0.6,
                     pre_delay: tuple = None) -> bool:
@@ -486,15 +510,21 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
         """在结算界面点击绿框标注的区域，直到回到可继续操作的界面。
 
         胜利后回到祸主降临主界面（第 3 步界面），失败后回到同一只鬼王的挑战界面。
+        每次点击前都随机等待 1.5~3 秒（wait_before_click）：结算文字与淡入动画
+        没定格时点击会被吞掉；等待结束后先复核界面，已经自己关掉就不再补点。
         """
+        label = '胜利结算' if result == 'WIN' else '失败结算'
         for i in range(1, 9):
+            self.wait_before_click(f'{label}区域（第 {i} 次）')
+            self.screenshot()
+            if self.settle_finished():
+                logger.info(f'{label}在随机等待期间已自行关闭')
+                return True
             self.click(random.choice(self.settle_click_areas()), interval=1.2)
             self.device.click_record_clear()
-            sleep(1.2)
+            sleep(1.0)
             self.screenshot()
-            if (self.appear(self.I_CGW_CHALLENGE)
-                    or self.appear(self.I_CGW_SUMMON)
-                    or self.appear(self.I_CGW_DEMON_ICON)):
+            if self.settle_finished():
                 logger.info(f'已离开结算界面（第 {i} 次点击）')
                 return True
             if self.ui_reward_appear_click():
@@ -631,7 +661,13 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
                 continue
 
             if page == 'SETTLE':
-                # 第 9 步：结算界面，点击绿框任意一处返回
+                # 第 9 步：结算界面，点击绿框任意一处返回。
+                # 与正常流程一致，点击前先随机等 1.5~3 秒，等结算文字/动画定格
+                self.wait_before_click('结算界面（恢复流程）')
+                self.screenshot()
+                if self.settle_finished():
+                    logger.info('结算界面已自行关闭，无需补点')
+                    continue
                 self.click(random.choice(self.settle_click_areas()), interval=1.2)
                 self.device.click_record_clear()
                 logger.info('结算界面 → 点击绿框区域返回')
