@@ -18,6 +18,12 @@
     "description": "右下角召唤鬼王与挑战按钮的统一点击区域"
   },
   {
+    "itemName": "cgw_prepare_click",
+    "roiFront": "1145,545,70,70",
+    "roiBack": "1145,545,70,70",
+    "description": "战斗准备界面右下角准备鼓形按钮的中心区域"
+  },
+  {
     "itemName": "cgw_settle_left",
     "roiFront": "15,35,250,390",
     "roiBack": "15,35,250,390",

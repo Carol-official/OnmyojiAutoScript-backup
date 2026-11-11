@@ -18,7 +18,9 @@ class ChaoGuiWangAssets:
 	C_CGW_HUOZHU_CLICK = RuleClick(roi_front=(900,70,45,180), roi_back=(900,70,45,180), name="cgw_huozhu_click")
 	# 右下角召唤鬼王与挑战按钮的统一点击区域 
 	C_CGW_BOTTOM_BUTTON = RuleClick(roi_front=(1100,560,155,140), roi_back=(1100,560,155,140), name="cgw_bottom_button")
-	# 结算界面用户标注的左侧可点击区域 
+	# 战斗准备界面右下角「准备」鼓形按钮的中心区域 
+	C_CGW_PREPARE_CLICK = RuleClick(roi_front=(1145,545,70,70), roi_back=(1145,545,70,70), name="cgw_prepare_click")
+	# 结算界面用户标注的左侧可点击区域
 	C_CGW_SETTLE_LEFT = RuleClick(roi_front=(15,35,250,390), roi_back=(15,35,250,390), name="cgw_settle_left")
 	# 结算界面用户标注的右侧可点击区域 
 	C_CGW_SETTLE_RIGHT = RuleClick(roi_front=(1040,70,220,415), roi_back=(1040,70,220,415), name="cgw_settle_right")

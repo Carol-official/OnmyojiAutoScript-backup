@@ -32,6 +32,16 @@ from tasks.Component.RightActivity.right_activity import RightActivity
 from tasks.Component.SwitchSoul.switch_soul import SwitchSoul
 from tasks.GameUi.page import page_main, page_shikigami_records
 
+# 准备阶段的节奏参数（单位：秒）。
+# 游戏在界面切换的头几帧会吞掉点击，模拟器越慢越明显，可按需调大这些值。
+PREPARE_STABLE_FRAMES = 2       # 准备按钮连续出现多少帧才认为准备界面已加载完毕
+PREPARE_FRAME_INTERVAL = 0.6    # 稳定检查的截图间隔
+PREPARE_AFTER_CHALLENGE = 2.0   # 点完「挑战」后留给游戏加载准备界面的时间
+PREPARE_AFTER_CLICK = 1.5       # 每次点完「准备」后等待游戏响应的时间
+PREPARE_CONFIRM_TIMEOUT = 45    # 确认「已进入战斗」的总超时
+PREPARE_RETRY_INTERVAL = 2.5    # 两次补点之间的最小间隔，也作为首次点击的宽限期
+PREPARE_RETRY_LIMIT = 6         # 最多补点次数
+
 
 class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAssets):
     """超鬼王（祸主降临）任务。"""
@@ -181,41 +191,110 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
         """用户绿框标注的三处结算可点击区域。"""
         return [self.C_CGW_SETTLE_LEFT, self.C_CGW_SETTLE_RIGHT, self.C_CGW_SETTLE_BOTTOM]
 
-    def click_stage(self, image, action=None, timeout: int = 20) -> bool:
-        """等待某个按钮出现并点击一次，超时返回 False。"""
+    def click_stage(self, image, action=None, timeout: int = 20,
+                    stable: int = 1, delay: float = 0.6) -> bool:
+        """等待按钮稳定出现后点击一次，超时返回 False。
+
+        stable > 1 时要求连续多帧都识别到按钮，避免界面切换动画期间
+        「按钮刚画出来、还不可点」就把点击打出去；delay 是点击后留给
+        游戏加载下一界面的缓冲时间。
+        """
         timer = Timer(timeout).start()
+        seen = 0
         while 1:
             self.screenshot()
-            if action is None:
-                clicked = self.appear_then_click(image, interval=1.2)
+            if self.appear(image):
+                seen += 1
             else:
-                clicked = self.appear_then_click(image, action=action, interval=1.2)
-            if clicked:
-                logger.info(f'点击 {image.name}')
-                return True
+                seen = 0
+            if seen >= stable:
+                if action is None:
+                    clicked = self.appear_then_click(image, interval=1.2)
+                else:
+                    clicked = self.appear_then_click(image, action=action, interval=1.2)
+                if clicked:
+                    logger.info(f'点击 {image.name}')
+                    sleep(delay)
+                    return True
             if self.ui_reward_appear_click():
                 continue
             if timer.reached():
                 logger.warning(f'等待 {image.name} 超时（{timeout} 秒）')
                 return False
-            sleep(0.3)
+            sleep(PREPARE_FRAME_INTERVAL if stable > 1 else 0.3)
+
+    def confirm_battle_started(self) -> bool:
+        """步骤 7 的闭环：确认「准备」点击真的生效，没生效就间隔补点。
+
+        旧逻辑点一次「准备」就直接进入等结算循环，若点击被界面切换动画吞掉，
+        就会一直停在准备界面，直到 200 秒战斗超时。这里用三种证据确认开战：
+          1. 出现战斗信息图标 I_BATTLE_INFO（准备界面实测不匹配）；
+          2. 出现胜利/结算画面（战斗可能很快结束）；
+          3. 准备按钮连续 3 帧不再出现。
+        仍在准备界面时按固定间隔补点，最多 PREPARE_RETRY_LIMIT 次。
+        """
+        timer = Timer(PREPARE_CONFIRM_TIMEOUT).start()
+        grace = Timer(PREPARE_RETRY_INTERVAL).start()
+        retries = 0
+        gone = 0
+        while 1:
+            self.screenshot()
+            if (self.appear(self.I_BATTLE_INFO)
+                    or self.appear(self.I_CGW_SETTLE)
+                    or self.appear(self.I_WIN)):
+                logger.info('已确认进入战斗')
+                return True
+            if self.appear(self.I_PREPARE_HIGHLIGHT):
+                # 高亮准备按钮还在，说明上一次点击没生效
+                gone = 0
+                if grace.reached() and retries < PREPARE_RETRY_LIMIT:
+                    if self.click(self.C_CGW_PREPARE_CLICK, interval=PREPARE_RETRY_INTERVAL):
+                        retries += 1
+                        # 连续补点同一按钮会触发框架的防卡死保护，清掉点击记录
+                        self.device.click_record_clear()
+                        logger.warning(f'准备界面未响应，第 {retries}/{PREPARE_RETRY_LIMIT} 次补点「准备」')
+                        grace.reset()
+                        sleep(PREPARE_AFTER_CLICK)
+                        continue
+            elif self.appear(self.I_PREPARE_DARK):
+                # 按钮变暗通常表示已准备、正在等待开战，只等不点
+                gone = 0
+            else:
+                gone += 1
+                if gone >= 3:
+                    logger.info('准备按钮已消失，战斗开始')
+                    return True
+            if self.ui_reward_appear_click():
+                continue
+            if timer.reached():
+                logger.warning(f'确认进入战斗超时（{PREPARE_CONFIRM_TIMEOUT} 秒，补点 {retries} 次）')
+                return False
+            sleep(0.5)
 
     def battle_once(self, cfg) -> bool:
         """完成一次击杀：召唤 → 挑战 → 准备 → 等待结算 → 点击绿框返回主界面。"""
         # 步骤 5：召唤鬼王
-        if not self.click_stage(self.I_CGW_SUMMON, self.C_CGW_BOTTOM_BUTTON, timeout=20):
+        if not self.click_stage(self.I_CGW_SUMMON, self.C_CGW_BOTTOM_BUTTON,
+                                timeout=20, delay=1.0):
             return False
-        # 步骤 6：挑战
-        if not self.click_stage(self.I_CGW_CHALLENGE, self.C_CGW_BOTTOM_BUTTON, timeout=20):
+        # 步骤 6：挑战。点完多等一会儿，别在准备界面还没加载出来时就把点击打出去
+        if not self.click_stage(self.I_CGW_CHALLENGE, self.C_CGW_BOTTOM_BUTTON,
+                                timeout=20, delay=PREPARE_AFTER_CHALLENGE):
             return False
-        # 步骤 7：准备（复用通用战斗组件的高亮准备按钮）
-        if not self.click_stage(self.I_PREPARE_HIGHLIGHT, timeout=30):
+        # 步骤 7：准备按钮连续两帧稳定后再点，并改用按钮中心的固定点击区域
+        if not self.click_stage(self.I_PREPARE_HIGHLIGHT, self.C_CGW_PREPARE_CLICK,
+                                timeout=30, stable=PREPARE_STABLE_FRAMES,
+                                delay=PREPARE_AFTER_CLICK):
+            return False
+        # 确认游戏真的开战了；没响应就间隔补点，避免卡在准备界面直到战斗超时
+        if not self.confirm_battle_started():
             return False
 
+        # 确认开战之后才开始计战斗超时，避免把准备阶段算进去
         # 长战斗需登记白名单，避免被设备的卡死检测误判
         self.device.stuck_record_add('BATTLE_STATUS_S')
         self.device.click_record_clear()
-        logger.info('已点击准备，等待鬼王战斗结束')
+        logger.info('已确认开战，等待鬼王战斗结束')
         timer = Timer(cfg.battle_timeout).start()
         settle_clicked = False
         while 1:
@@ -250,6 +329,14 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
                 continue
             if self.ui_reward_appear_click():
                 continue
+            # 若仍卡在准备界面，点左上角返回并确认退出，避免下一轮在错误界面乱点
+            if self.appear(self.I_PREPARE_HIGHLIGHT) or self.appear(self.I_PREPARE_DARK):
+                if self.appear_then_click(self.I_UI_CONFIRM_SAMLL, interval=1.5):
+                    continue
+                if self.appear_then_click(self.I_UI_CONFIRM, interval=1.5):
+                    continue
+                if self.appear_then_click(self.I_UI_BACK_BLUE, interval=1.5):
+                    continue
             if self.appear_then_click(self.I_UI_BACK_YELLOW, interval=1.5):
                 continue
             if timer.reached():
@@ -317,8 +404,8 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
             # 步骤 5~8：完成一轮计一只
             if not self.battle_once(cfg):
                 self.push('超鬼王·本轮超时',
-                          f'召唤/挑战/准备/结算环节超时（战斗上限 {cfg.battle_timeout} 秒），'
-                          f'已击杀 {killed}/{cfg.kill_count} 只，将重试下一轮。')
+                          f'召唤/挑战/准备/结算环节超时（含准备确认 {PREPARE_CONFIRM_TIMEOUT} 秒、'
+                          f'战斗上限 {cfg.battle_timeout} 秒），已击杀 {killed}/{cfg.kill_count} 只，将重试下一轮。')
                 consecutive_timeout += 1
                 if consecutive_timeout >= cfg.max_consecutive_timeout:
                     stop_reason = '连续超时，任务终止'
