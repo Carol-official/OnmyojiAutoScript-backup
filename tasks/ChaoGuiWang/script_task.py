@@ -1,24 +1,29 @@
 # This Python file uses the following encoding: utf-8
 """超鬼王 · 祸主降临。
 
-流程（对应需求中的九个步骤）：
+流程：
     1. 庭院点击最右侧的超鬼王活动图标
     2. 点击「祸主降临」文字
     3. 等待「自己发现」区域的鬼面图标出现（每 5 秒检查一次，最多 40 秒）
     4. 读取右上角疲劳度，超过阈值则推送并停止
-    5. 点击右下角「召唤鬼王」
-    6. 点击右下角「挑战」
-    7. 点击右下角「准备」，等待鬼王打完（最多 200 秒）
-    8. 结算界面点击用户标注的三个安全区域之一
-    9. 游戏自动回到第 3 步界面，循环直至击杀数量达标
+    5. 召唤鬼王前先识别鬼王星级（圆形图标下方的橙色勾玉数量 = 星级）
+    6. 点击右下角「召唤鬼王」
+    7. 点击右下角「挑战」
+    8. 点击右下角「准备」，等待鬼王打完（最多 200 秒）
+    9. 结算界面点击用户标注的三个安全区域之一
+   10. 胜利计入一只并回到第 3 步；失败不计入，直接继续点「挑战」重打同一只鬼王
 
-全局要求：
-    a. 任务执行前切换御魂预设
-    b. 可设置击杀数量；完成一轮（第3步到第8步）计一只，达标后推送并结束
+结束条件：
+    - 按数量模式：击杀数达到设定值 → 推送「打完所设置数量的鬼王」
+    - 按星级模式：识别到未勾选的星级 → 推送「打完所选星级鬼王」
+    - 任意模式：圆形图标变成金色鬼面且没有橙色勾玉 → 门票耗尽，推送「任务完成」
+    - 疲劳度超过阈值 → 推送「超过疲劳阈值」
+    - 连续挑战失败达到上限 → 推送「连续挑战失败」
+    - 找不到活动入口或界面恢复失败 → 推送「任务完全失败」
 
 消息推送统一走框架通知 self.config.notifier.push()，
 在「脚本设置 → 错误」里开启推送并配置 provider: pushplus 即为 PushPlus 推送。
-每一处推送都可以在任务配置里单独关闭，另有 notify_enable 总开关。
+以上六类推送各有独立开关，另有 notify_enable 总开关，每条推送都带已击杀数量。
 
 任务卡住/超时时会把所有界面模板逐个匹配一遍并打印分数，判定当前停在哪个界面，
 再按「结算 → 战斗 → 准备 → 挑战 → 主界面 → 活动 → 庭院」的流程把游戏推回第 3 步。
@@ -26,11 +31,14 @@
 import random
 from time import sleep
 
+import cv2
+
 from module.base.timer import Timer
 from module.exception import TaskEnd
 from module.logger import logger
 
 from tasks.ChaoGuiWang.assets import ChaoGuiWangAssets
+from tasks.ChaoGuiWang.config import ChaoGuiWangTarget
 from tasks.Component.GeneralBattle.assets import GeneralBattleAssets
 from tasks.Component.RightActivity.right_activity import RightActivity
 from tasks.Component.SwitchSoul.switch_soul import SwitchSoul
@@ -56,6 +64,20 @@ RECOVER_MAX_ACTIONS = 15        # 单次恢复最多执行多少个「推进动�
 RECOVER_UNKNOWN_LIMIT = 6       # 连续多少轮识别不出界面就放弃恢复
 RECOVER_REWARD_LIMIT = 5        # 最多连续关多少次奖励弹窗，避免弹窗判定不停空转
 
+# ---------------- 鬼王星级识别（坐标基于 1280x720）----------------
+# 召唤鬼王界面「全部队列」左侧的圆形图标，下方是一排橙色勾玉，
+# 亮起来的勾玉个数就是鬼王星级；勾玉间距固定 8px，起点也固定。
+STAR_ROW_ROI = (1058, 526, 58, 17)
+# 实测 1~6 星分别对应 33/55/82/108/137/162 个橙色像素，每多一星约多 26 个，
+# 取整后余量充足；低于该基数一半认为没有勾玉。
+STAR_ORANGE_PER_RANK = 26.5
+STAR_ORANGE_MIN = 12
+# 圆形图标本体，门票打空时这里会变成金色鬼面具，且下方没有橙色勾玉
+TICKET_ICON_ROI = (1050, 485, 65, 67)
+TICKET_GOLD_MIN = 100
+
+STAR_NAMES = {1: '1星', 2: '2星', 3: '3星', 4: '4星', 5: '5星', 6: '6星'}
+
 
 class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAssets):
     """超鬼王（祸主降临）任务。"""
@@ -66,7 +88,7 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
     def push(self, title: str, content: str, enabled: bool = True) -> bool:
         """统一走框架消息推送，受「总开关 + 该场景开关」双重控制。
 
-        enabled 由调用方传入对应场景的配置项，例如 cfg.notify_round_timeout；
+        enabled 由调用方传入对应场景的配置项，例如 cfg.notify_fatigue_limit；
         总开关 notify_enable 在这里统一读取，关掉后所有推送都不再发送。
         返回是否真的调用了推送，便于调用方记录；不影响任务流程。
 
@@ -214,10 +236,72 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
         return None
 
     # ------------------------------------------------------------------
-    # 步骤 5~8：召唤、挑战、准备、结算
+    # 步骤 5：鬼王星级与门票判定
+    # ------------------------------------------------------------------
+    def _hsv(self, area) -> 'cv2.Mat':
+        """截取指定区域并转成 HSV，坐标按 1280x720 绝对像素。"""
+        x, y, w, h = area
+        return cv2.cvtColor(self.device.image[y:y + h, x:x + w], cv2.COLOR_RGB2HSV)
+
+    def read_demon_star(self) -> int:
+        """数圆形图标下方亮起的橙色勾玉，几个勾玉就是几星。
+
+        返回 1~6；返回 0 表示没有检测到勾玉（门票打空，或是界面还没加载好）。
+        用像素面积换算而不是逐个数连通域：低星级时勾玉之间会粘连，
+        连通域个数会少算，而面积随星级单调线性增长，实测余量约 ±0.8 个点。
+        """
+        hsv = self._hsv(STAR_ROW_ROI)
+        orange = ((hsv[..., 0] >= 5) & (hsv[..., 0] <= 28) &
+                  (hsv[..., 1] >= 120) & (hsv[..., 2] >= 150))
+        pixels = int(orange.sum())
+        if pixels < STAR_ORANGE_MIN:
+            return 0
+        rank = int(round(pixels / STAR_ORANGE_PER_RANK))
+        return max(1, min(6, rank))
+
+    def is_ticket_empty(self) -> bool:
+        """所有鬼王门票都打完了：圆形图标变成金色鬼面，且下方没有橙色勾玉。"""
+        if self.read_demon_star():
+            return False
+        hsv = self._hsv(TICKET_ICON_ROI)
+        gold = ((hsv[..., 0] >= 15) & (hsv[..., 0] <= 42) &
+                (hsv[..., 1] >= 80) & (hsv[..., 2] >= 95))
+        pixels = int(gold.sum())
+        if pixels >= TICKET_GOLD_MIN:
+            logger.info(f'识别到金色鬼面图标（金色像素 {pixels}），门票已打完')
+            return True
+        return False
+
+    def read_star_with_retry(self, times: int = 3) -> int:
+        """星级图标偶尔会被界面动画遮住，连续识别到同一个结果才采信。"""
+        last = None
+        for _ in range(times):
+            self.screenshot()
+            star = self.read_demon_star()
+            if star and star == last:
+                return star
+            last = star
+            sleep(1)
+        return last or 0
+
+    def star_allowed(self, star: int, cfg) -> bool:
+        """当前星级是否在勾选范围内；三个开关都没勾时按全打处理，避免一进来就结束。"""
+        if not (cfg.star_rank_1_4 or cfg.star_rank_5 or cfg.star_rank_6):
+            logger.warning('星级模式的三个开关都未勾选，本次按「所有星级都打」处理')
+            return True
+        if cfg.star_rank_1_4 and 1 <= star <= 4:
+            return True
+        if cfg.star_rank_5 and star == 5:
+            return True
+        if cfg.star_rank_6 and star == 6:
+            return True
+        return False
+
+    # ------------------------------------------------------------------
+    # 步骤 6~9：召唤、挑战、准备、战斗、结算
     # ------------------------------------------------------------------
     def settle_click_areas(self) -> list:
-        """用户绿框标注的三处结算可点击区域。"""
+        """用户绿框标注的三处结算可点击区域，胜利与失败界面通用。"""
         return [self.C_CGW_SETTLE_LEFT, self.C_CGW_SETTLE_RIGHT, self.C_CGW_SETTLE_BOTTOM]
 
     def click_stage(self, image, action=None, timeout: int = 20,
@@ -268,12 +352,12 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
             sleep(PREPARE_FRAME_INTERVAL if stable > 1 else 0.3)
 
     def confirm_battle_started(self) -> bool:
-        """步骤 7 的闭环：确认「准备」点击真的生效，没生效就间隔补点。
+        """步骤 8 的闭环：确认「准备」点击真的生效，没生效就间隔补点。
 
         旧逻辑点一次「准备」就直接进入等结算循环，若点击被界面切换动画吞掉，
         就会一直停在准备界面，直到 200 秒战斗超时。这里用三种证据确认开战：
           1. 出现战斗信息图标 I_BATTLE_INFO（准备界面实测不匹配）；
-          2. 出现胜利/结算画面（战斗可能很快结束）；
+          2. 出现胜利/失败结算画面（战斗可能很快结束）；
           3. 准备按钮连续 3 帧不再出现。
         仍在准备界面时按固定间隔补点，最多 PREPARE_RETRY_LIMIT 次。
         """
@@ -285,6 +369,7 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
             self.screenshot()
             if (self.appear(self.I_BATTLE_INFO)
                     or self.appear(self.I_CGW_SETTLE)
+                    or self.appear(self.I_CGW_SETTLE_FAIL)
                     or self.appear(self.I_WIN)):
                 logger.info('已确认进入战斗')
                 return True
@@ -315,63 +400,95 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
                 return False
             sleep(0.5)
 
-    def battle_once(self, cfg) -> bool:
-        """完成一次击杀：召唤 → 挑战 → 准备 → 等待结算 → 点击绿框返回主界面。
+    def wait_settle(self, cfg) -> str:
+        """战斗中等待结算界面，返回 'WIN' / 'LOSE' / 'TIMEOUT'。
 
-        任一环节超时都会把具体阶段记到 self.last_timeout_stage，
-        交给外层做「逐个模板诊断界面 + 按流程恢复」。
+        胜利与失败共用同一套布局，但标题文字不同：胜利是金色「胜利」，
+        失败是灰白「失败」，因此用两个模板分别判定。实测失败界面在胜利模板上
+        只有 0.27 分，胜利界面在失败模板上只有 0.31 分，互不误判。
         """
-        self.last_timeout_stage = ''
-        # 步骤 5：召唤鬼王。按钮出现后先随机等 1.5~3 秒再点
-        if not self.click_stage(self.I_CGW_SUMMON, self.C_CGW_BOTTOM_BUTTON,
-                                timeout=20, delay=1.0, pre_delay=BEFORE_CLICK_DELAY):
-            self.last_timeout_stage = '召唤鬼王'
-            return False
-        # 步骤 6：挑战。同样先随机等待，点完再多等一会儿，
-        # 别在准备界面还没加载出来时就把点击打出去
-        if not self.click_stage(self.I_CGW_CHALLENGE, self.C_CGW_BOTTOM_BUTTON,
-                                timeout=20, delay=PREPARE_AFTER_CHALLENGE,
-                                pre_delay=BEFORE_CLICK_DELAY):
-            self.last_timeout_stage = '挑战鬼王'
-            return False
-        # 步骤 7：准备按钮连续两帧稳定后再点，并改用按钮中心的固定点击区域
-        if not self.click_stage(self.I_PREPARE_HIGHLIGHT, self.C_CGW_PREPARE_CLICK,
-                                timeout=30, stable=PREPARE_STABLE_FRAMES,
-                                delay=PREPARE_AFTER_CLICK):
-            self.last_timeout_stage = '点击准备'
-            return False
-        # 确认游戏真的开战了；没响应就间隔补点，避免卡在准备界面直到战斗超时
-        if not self.confirm_battle_started():
-            self.last_timeout_stage = '确认进入战斗（准备界面）'
-            return False
-
-        # 确认开战之后才开始计战斗超时，避免把准备阶段算进去
         # 长战斗需登记白名单，避免被设备的卡死检测误判
         self.device.stuck_record_add('BATTLE_STATUS_S')
         self.device.click_record_clear()
         logger.info('已确认开战，等待鬼王战斗结束')
         timer = Timer(cfg.battle_timeout).start()
-        settle_clicked = False
         while 1:
             self.screenshot()
-            # 步骤 8：结算界面，点击绿框标注的任意一处
             if self.appear(self.I_CGW_SETTLE) or self.appear(self.I_WIN):
-                settle_clicked = True
-                self.click(random.choice(self.settle_click_areas()), interval=1.2)
-                continue
+                self.device.stuck_record_clear()
+                logger.info('结算界面：胜利')
+                return 'WIN'
+            if self.appear(self.I_CGW_SETTLE_FAIL):
+                self.device.stuck_record_clear()
+                logger.warning('结算界面：挑战失败（未在限定时间内击杀）')
+                return 'LOSE'
             if self.ui_reward_appear_click():
                 continue
-            # 步骤 9：点击结算后游戏自动回到第 3 步界面
-            # 鬼面图标为主判定，召唤鬼王按钮作为主界面辅助判定（避免新鬼王卡片遮挡时卡住）
-            if settle_clicked and (self.appear(self.I_CGW_DEMON_ICON)
-                                  or self.appear(self.I_CGW_SUMMON)):
-                logger.info('已回到祸主降临界面，本轮击杀完成')
-                return True
             if timer.reached():
                 logger.warning(f'等待鬼王战斗结束超时（{cfg.battle_timeout} 秒）')
-                self.last_timeout_stage = '等待战斗结算'
-                return False
+                self.device.stuck_record_clear()
+                return 'TIMEOUT'
             sleep(0.3)
+
+    def leave_settle(self, result: str) -> bool:
+        """在结算界面点击绿框标注的区域，直到回到可继续操作的界面。
+
+        胜利后回到祸主降临主界面（第 3 步界面），失败后回到同一只鬼王的挑战界面。
+        """
+        for i in range(1, 9):
+            self.click(random.choice(self.settle_click_areas()), interval=1.2)
+            self.device.click_record_clear()
+            sleep(1.2)
+            self.screenshot()
+            if (self.appear(self.I_CGW_CHALLENGE)
+                    or self.appear(self.I_CGW_SUMMON)
+                    or self.appear(self.I_CGW_DEMON_ICON)):
+                logger.info(f'已离开结算界面（第 {i} 次点击）')
+                return True
+            if self.ui_reward_appear_click():
+                continue
+        logger.warning('点击结算区域后仍停留在结算界面')
+        return False
+
+    def fight_once(self, cfg, need_summon: bool) -> str:
+        """打完一次：召唤（可选）→ 挑战 → 准备 → 战斗 → 结算点击。
+
+        need_summon 为 False 表示挑战失败后重打同一只鬼王，此时不会再出现
+        「召唤鬼王」按钮，直接点「挑战」即可。
+        返回 'WIN' / 'LOSE' / 'TIMEOUT'；超时时把阶段写进 self.last_timeout_stage，
+        交给外层做「逐个模板诊断界面 + 按流程恢复」。
+        """
+        self.last_timeout_stage = ''
+        if need_summon:
+            # 步骤 6：召唤鬼王。按钮出现后先随机等 1.5~3 秒再点
+            if not self.click_stage(self.I_CGW_SUMMON, self.C_CGW_BOTTOM_BUTTON,
+                                    timeout=20, delay=1.0, pre_delay=BEFORE_CLICK_DELAY):
+                self.last_timeout_stage = '召唤鬼王'
+                return 'TIMEOUT'
+        # 步骤 7：挑战。同样先随机等待，点完再多等一会儿，
+        # 别在准备界面还没加载出来时就把点击打出去
+        if not self.click_stage(self.I_CGW_CHALLENGE, self.C_CGW_BOTTOM_BUTTON,
+                                timeout=20, delay=PREPARE_AFTER_CHALLENGE,
+                                pre_delay=BEFORE_CLICK_DELAY):
+            self.last_timeout_stage = '挑战鬼王'
+            return 'TIMEOUT'
+        # 步骤 8：准备按钮连续两帧稳定后再点，并改用按钮中心的固定点击区域
+        if not self.click_stage(self.I_PREPARE_HIGHLIGHT, self.C_CGW_PREPARE_CLICK,
+                                timeout=30, stable=PREPARE_STABLE_FRAMES,
+                                delay=PREPARE_AFTER_CLICK):
+            self.last_timeout_stage = '点击准备'
+            return 'TIMEOUT'
+        if not self.confirm_battle_started():
+            self.last_timeout_stage = '确认进入战斗（准备界面）'
+            return 'TIMEOUT'
+
+        result = self.wait_settle(cfg)
+        if result == 'TIMEOUT':
+            self.last_timeout_stage = '等待战斗结算'
+            return 'TIMEOUT'
+        # 步骤 9：结算界面点击绿框区域返回
+        self.leave_settle(result)
+        return result
 
     # ------------------------------------------------------------------
     # 卡住超时：逐个模板诊断界面 + 按游戏流程恢复
@@ -386,7 +503,8 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
         所以「第 3 步已就绪」要排在「召唤按钮可见」前面。
         """
         return [
-            ('SETTLE', '战斗结算界面', [self.I_CGW_SETTLE, self.I_WIN]),
+            ('SETTLE', '战斗结算界面（胜利或失败）', [self.I_CGW_SETTLE,
+                                                  self.I_CGW_SETTLE_FAIL, self.I_WIN]),
             ('PREPARE', '战斗准备界面', [self.I_PREPARE_HIGHLIGHT, self.I_PREPARE_DARK]),
             ('BATTLE', '鬼王战斗中', [self.I_BATTLE_INFO]),
             ('CHALLENGE', '鬼王卡片 / 挑战界面', [self.I_CGW_CHALLENGE]),
@@ -444,8 +562,8 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
         reward_clicks = 0
         while 1:
             page = self.log_page_diagnosis(f'{stage}（第 {actions + 1} 次推进）')
-            if page in ('MAIN_READY', 'MAIN_SUMMON'):
-                logger.info('已回到祸主降临主界面，界面恢复完成')
+            if page in ('MAIN_READY', 'MAIN_SUMMON', 'CHALLENGE'):
+                logger.info('已回到可继续操作的界面，界面恢复完成')
                 return True
             if timer.reached() or actions >= RECOVER_MAX_ACTIONS:
                 logger.error(f'界面恢复结束：超时或推进次数用尽（{actions} 次）')
@@ -461,13 +579,13 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
                 continue
 
             if page == 'SETTLE':
-                # 第 8 步：结算界面，点击绿框任意一处回到第 3 步
+                # 第 9 步：结算界面，点击绿框任意一处返回
                 self.click(random.choice(self.settle_click_areas()), interval=1.2)
                 self.device.click_record_clear()
-                logger.info('结算界面 → 点击绿框区域返回主界面')
+                logger.info('结算界面 → 点击绿框区域返回')
                 sleep(1.2)
             elif page == 'PREPARE':
-                # 第 7 步：仍在准备界面，说明「准备」被吞了，补一点让战斗继续
+                # 第 8 步：仍在准备界面，说明「准备」被吞了，补一点让战斗继续
                 if self.appear(self.I_PREPARE_HIGHLIGHT):
                     self.click(self.C_CGW_PREPARE_CLICK, interval=PREPARE_RETRY_INTERVAL)
                     self.device.click_record_clear()
@@ -482,7 +600,7 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
                 sleep(3)
                 continue
             elif page == 'CHALLENGE':
-                # 第 6 步：挑战按钮还在，随机等待后补点挑战
+                # 第 7 步：挑战按钮还在，随机等待后补点挑战
                 wait = random.uniform(*BEFORE_CLICK_DELAY)
                 logger.info(f'挑战界面 → 随机等待 {wait:.2f} 秒后点击「挑战」')
                 sleep(wait)
@@ -528,10 +646,16 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
     def run(self):
         conf = self.config.chao_gui_wang
         cfg = conf.chao_gui_wang_config
+        by_star = cfg.target_mode == ChaoGuiWangTarget.STAR
         killed = 0
-        consecutive_timeout = 0
-        stop_reason = ''
-        final_pushed = False
+        defeats = 0
+        timeouts = 0
+        need_summon = True
+
+        logger.info(f'结束条件：{cfg.target_mode.value}'
+                    + ('' if by_star else f'，目标 {cfg.kill_count} 只')
+                    + (f'，星级开关 1-4星={cfg.star_rank_1_4} '
+                       f'5星={cfg.star_rank_5} 6星={cfg.star_rank_6}' if by_star else ''))
 
         # 全局要求 a：执行任务前切换御魂预设
         self.switch_soul_before_run(conf.switch_soul_config)
@@ -541,88 +665,123 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
         if not self.enter_activity():
             logger.warning('步骤 1 未能进入活动，先做界面诊断恢复')
             if not self.diagnose_and_recover('进入活动入口'):
-                self.push('超鬼王·未找到活动入口',
-                          '庭院右侧未能进入超鬼王活动，界面诊断恢复也未成功，'
-                          '任务结束，请检查活动是否已开放。',
-                          enabled=cfg.notify_entry_failed)
+                self.push('超鬼王·任务完全失败',
+                          f'庭院右侧未能进入超鬼王活动，界面诊断恢复也未成功，任务结束，'
+                          f'请检查活动是否已开放。已击杀 {killed} 只。',
+                          enabled=cfg.notify_task_failed)
                 self.set_next_run(task='ChaoGuiWang', success=False, finish=True)
                 raise TaskEnd('ChaoGuiWang')
         if not self.open_huozhu():
             logger.warning('步骤 2 未能进入祸主降临，先做界面诊断恢复')
             if not self.diagnose_and_recover('进入祸主降临界面'):
-                self.push('超鬼王·进入活动失败',
-                          '未能进入「祸主降临」界面，界面诊断恢复也未成功，'
-                          '任务结束，请检查活动是否已开放。',
-                          enabled=cfg.notify_open_failed)
+                self.push('超鬼王·任务完全失败',
+                          f'未能进入「祸主降临」界面，界面诊断恢复也未成功，任务结束，'
+                          f'请检查活动是否已开放。已击杀 {killed} 只。',
+                          enabled=cfg.notify_task_failed)
                 self.set_next_run(task='ChaoGuiWang', success=False, finish=True)
                 raise TaskEnd('ChaoGuiWang')
 
-        # 全局要求 b：按设置的击杀数量循环
-        while killed < cfg.kill_count:
-            logger.hr(f'超鬼王 第 {killed + 1}/{cfg.kill_count} 只', 2)
+        while 1:
+            # 数量模式：达到设定只数即结束
+            if not by_star and killed >= cfg.kill_count:
+                self.push('超鬼王·打完所设置数量的鬼王',
+                          f'已完成设定的 {cfg.kill_count} 只超鬼王，任务结束。'
+                          f'共击杀 {killed} 只。',
+                          enabled=cfg.notify_count_cleared)
+                break
 
-            # 步骤 3：等待鬼面图标
-            if not self.wait_demon_icon(cfg):
-                self.push('超鬼王·等待图标超时',
-                          f'等待「自己发现」鬼面图标超过 {cfg.wait_icon_timeout} 秒，'
-                          f'已击杀 {killed}/{cfg.kill_count} 只，正在诊断界面并尝试恢复。',
-                          enabled=cfg.notify_wait_icon_timeout)
-                consecutive_timeout += 1
-                recovered = self.diagnose_and_recover('等待鬼面图标')
-                if not recovered or consecutive_timeout >= cfg.max_consecutive_timeout:
-                    stop_reason = '界面恢复失败或连续超时，任务终止'
+            # 只有面对「新鬼王」时，才需要等图标、判门票、判疲劳、读星级；
+            # 挑战失败重打同一只鬼王时这些都跳过，直接再点挑战。
+            if need_summon:
+                logger.hr(f'超鬼王 已击杀 {killed} 只', 2)
+
+                # 步骤 3：等待鬼面图标
+                if not self.wait_demon_icon(cfg):
+                    logger.warning('等待鬼面图标超时，先做界面诊断恢复')
+                    timeouts += 1
+                    recovered = self.diagnose_and_recover('等待鬼面图标')
+                    if not recovered or timeouts >= cfg.max_consecutive_timeout:
+                        self.push('超鬼王·任务完全失败',
+                                  f'等待鬼面图标超时且界面恢复失败，任务结束。'
+                                  f'已击杀 {killed} 只。',
+                                  enabled=cfg.notify_task_failed)
+                        break
+                    continue
+
+                # 任意模式下，门票打空都直接结束
+                if self.is_ticket_empty():
+                    self.push('超鬼王·任务完成',
+                              f'所有鬼王门票已打完（图标显示金色鬼面），任务结束。'
+                              f'共击杀 {killed} 只。',
+                              enabled=cfg.notify_task_complete)
+                    break
+
+                # 步骤 4：疲劳度判定（严格「超过」阈值才停止）
+                fatigue = self.get_fatigue()
+                if fatigue is None:
+                    self.push('超鬼王·超过疲劳阈值',
+                              f'右上角疲劳度连续识别失败，为避免超疲劳，任务提前结束。'
+                              f'已击杀 {killed} 只。',
+                              enabled=cfg.notify_fatigue_limit)
+                    break
+                logger.info(f'当前疲劳度 {fatigue}/100，阈值 {cfg.fatigue_limit}')
+                if fatigue > cfg.fatigue_limit:
+                    self.push('超鬼王·超过疲劳阈值',
+                              f'当前疲劳度 {fatigue}/100，超过设定阈值 {cfg.fatigue_limit}，'
+                              f'任务结束。已击杀 {killed} 只。',
+                              enabled=cfg.notify_fatigue_limit)
+                    break
+
+                # 步骤 5：星级判定
+                star = self.read_star_with_retry()
+                if star:
+                    logger.info(f'识别到鬼王星级：{STAR_NAMES.get(star, star)}')
+                else:
+                    logger.warning('未能识别鬼王星级，按允许处理继续战斗')
+                if by_star and star and not self.star_allowed(star, cfg):
+                    self.push('超鬼王·打完所选星级鬼王',
+                              f'识别到 {STAR_NAMES.get(star, star)} 鬼王，不在勾选的星级范围内，'
+                              f'说明所选星级已打完，任务结束。'
+                              f'已击杀 {killed} 只。',
+                              enabled=cfg.notify_star_cleared)
+                    break
+
+            # 步骤 6~9：打一轮
+            result = self.fight_once(cfg, need_summon)
+            if result == 'WIN':
+                killed += 1
+                defeats = 0
+                timeouts = 0
+                need_summon = True
+                logger.info(f'挑战成功，已击杀超鬼王 {killed} 只')
+                continue
+
+            if result == 'LOSE':
+                defeats += 1
+                need_summon = False
+                logger.warning(f'挑战失败，连续失败 {defeats}/{cfg.max_consecutive_defeat} 次，'
+                               f'继续挑战同一只鬼王')
+                if defeats >= cfg.max_consecutive_defeat:
+                    self.push('超鬼王·连续挑战失败',
+                              f'连续 {defeats} 次挑战失败，可能是御魂或阵容配置有问题，'
+                              f'任务已停止。已击杀 {killed} 只。',
+                              enabled=cfg.notify_defeat_limit)
                     break
                 continue
 
-            # 步骤 4：疲劳度判定（严格「超过」阈值才停止）
-            fatigue = self.get_fatigue()
-            if fatigue is None:
-                self.push('超鬼王·疲劳度识别失败',
-                          '右上角疲劳度连续识别失败，为避免超疲劳，'
-                          f'任务停止。已击杀 {killed} 只。',
-                          enabled=cfg.notify_fatigue_ocr_failed)
-                # 该场景已有专属通知，无论开关是否开启都不再补发通用的结束通知
-                final_pushed = True
-                stop_reason = '疲劳度识别失败'
-                break
-            logger.info(f'当前疲劳度 {fatigue}/100，阈值 {cfg.fatigue_limit}')
-            if fatigue > cfg.fatigue_limit:
-                self.push('超鬼王·疲劳度已达上限',
-                          f'当前疲劳度 {fatigue}/100，超过设定阈值 {cfg.fatigue_limit}，'
-                          f'任务停止。已击杀 {killed}/{cfg.kill_count} 只。',
-                          enabled=cfg.notify_fatigue_limit)
-                final_pushed = True
-                stop_reason = '疲劳度超过阈值'
-                break
-
-            # 步骤 5~8：完成一轮计一只
-            if not self.battle_once(cfg):
-                stage = self.last_timeout_stage or '本轮战斗'
-                self.push('超鬼王·本轮超时',
+            # TIMEOUT：界面卡住，逐个模板诊断并恢复
+            stage = self.last_timeout_stage or '本轮战斗'
+            logger.warning(f'{stage} 环节超时，先做界面诊断恢复')
+            timeouts += 1
+            recovered = self.diagnose_and_recover(stage)
+            need_summon = True
+            if not recovered or timeouts >= cfg.max_consecutive_timeout:
+                self.push('超鬼王·任务完全失败',
                           f'{stage} 环节超时（含准备确认 {PREPARE_CONFIRM_TIMEOUT} 秒、'
-                          f'战斗上限 {cfg.battle_timeout} 秒），已击杀 {killed}/{cfg.kill_count} 只，'
-                          f'正在诊断界面并尝试恢复。',
-                          enabled=cfg.notify_round_timeout)
-                consecutive_timeout += 1
-                recovered = self.diagnose_and_recover(stage)
-                if not recovered or consecutive_timeout >= cfg.max_consecutive_timeout:
-                    stop_reason = '界面恢复失败或连续超时，任务终止'
-                    break
-                continue
-
-            killed += 1
-            consecutive_timeout = 0
-            logger.info(f'已击杀超鬼王 {killed}/{cfg.kill_count} 只')
-
-        # 结束推送与调度
-        if killed >= cfg.kill_count:
-            self.push('超鬼王·任务完成',
-                      f'已完成设定的击杀数量 {killed} 只超鬼王，任务结束。',
-                      enabled=cfg.notify_task_complete)
-        elif not final_pushed and stop_reason:
-            self.push('超鬼王·任务提前结束',
-                      f'结束原因：{stop_reason}；已击杀 {killed}/{cfg.kill_count} 只。',
-                      enabled=cfg.notify_task_aborted)
+                          f'战斗上限 {cfg.battle_timeout} 秒），界面恢复失败，任务结束。'
+                          f'已击杀 {killed} 只。',
+                          enabled=cfg.notify_task_failed)
+                break
 
         logger.info(f'超鬼王任务结束，共击杀 {killed} 只')
         self.set_next_run(task='ChaoGuiWang', success=True, finish=True)

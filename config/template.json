@@ -1607,21 +1607,24 @@
       "team_name": ""
     },
     "chao_gui_wang_config": {
+      "target_mode": "按数量",
       "kill_count": 30,
+      "star_rank_1_4": true,
+      "star_rank_5": false,
+      "star_rank_6": false,
       "fatigue_limit": 90,
       "wait_icon_timeout": 40,
       "wait_icon_interval": 5,
       "battle_timeout": 200,
+      "max_consecutive_defeat": 3,
       "max_consecutive_timeout": 3,
       "notify_enable": true,
-      "notify_entry_failed": true,
-      "notify_open_failed": true,
-      "notify_wait_icon_timeout": true,
-      "notify_fatigue_ocr_failed": true,
-      "notify_fatigue_limit": true,
-      "notify_round_timeout": true,
       "notify_task_complete": true,
-      "notify_task_aborted": true
+      "notify_task_failed": true,
+      "notify_star_cleared": true,
+      "notify_count_cleared": true,
+      "notify_fatigue_limit": true,
+      "notify_defeat_limit": true
     }
   }
 }

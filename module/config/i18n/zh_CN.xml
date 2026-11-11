@@ -263,6 +263,17 @@
 	<message><source>Wait Icon Interval</source><translation>鬼面图标检查间隔(秒)</translation></message>
 	<message><source>Battle Timeout</source><translation>单场战斗超时(秒)</translation></message>
 	<message><source>Max Consecutive Timeout</source><translation>连续超时上限</translation></message>
+	<message><source>Target Mode</source><translation>结束条件</translation></message>
+	<message><source>Star Rank 1 4</source><translation>打1至4星鬼王</translation></message>
+	<message><source>Star Rank 5</source><translation>打5星鬼王</translation></message>
+	<message><source>Star Rank 6</source><translation>打6星鬼王</translation></message>
+	<message><source>Max Consecutive Defeat</source><translation>连续挑战失败上限</translation></message>
+	<message><source>Notify Task Complete</source><translation>任务完成时推送</translation></message>
+	<message><source>Notify Task Failed</source><translation>任务完全失败时推送</translation></message>
+	<message><source>Notify Star Cleared</source><translation>打完所选星级鬼王时推送</translation></message>
+	<message><source>Notify Count Cleared</source><translation>打完所设置数量的鬼王时推送</translation></message>
+	<message><source>Notify Fatigue Limit</source><translation>超过疲劳阈值时推送</translation></message>
+	<message><source>Notify Defeat Limit</source><translation>连续挑战失败时推送</translation></message>
 	<message>
         <source>Setting</source>
         <translation>设置</translation>

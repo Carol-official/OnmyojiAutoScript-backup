@@ -43,6 +43,8 @@ class ChaoGuiWangAssets:
 	I_CGW_CHALLENGE = RuleImage(roi_front=(1125,575,110,80), roi_back=(1080,540,200,180), threshold=0.8, method="Template matching", file="./tasks/ChaoGuiWang/cgw/cgw_cgw_challenge.png")
 	# 鬼王战斗结束后的胜利结算界面 
 	I_CGW_SETTLE = RuleImage(roi_front=(690,40,300,160), roi_back=(550,0,650,260), threshold=0.75, method="Template matching", file="./tasks/ChaoGuiWang/cgw/cgw_cgw_settle.png")
+	# 限定时间内未击杀鬼王时的挑战失败结算界面，只取失败二字区域
+	I_CGW_SETTLE_FAIL = RuleImage(roi_front=(585,55,290,120), roi_back=(520,0,440,260), threshold=0.75, method="Template matching", file="./tasks/ChaoGuiWang/cgw/cgw_cgw_settle_fail.png")
 
 
 	# Ocr Rule Assets

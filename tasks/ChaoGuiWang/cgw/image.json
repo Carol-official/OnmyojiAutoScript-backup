@@ -61,5 +61,14 @@
     "method": "Template matching",
     "threshold": 0.75,
     "description": "鬼王战斗结束后的胜利结算界面"
+  },
+  {
+    "itemName": "cgw_settle_fail",
+    "imageName": "cgw_cgw_settle_fail.png",
+    "roiFront": "585,55,290,120",
+    "roiBack": "520,0,440,260",
+    "method": "Template matching",
+    "threshold": 0.75,
+    "description": "限定时间内未击杀鬼王时的挑战失败结算界面，只取「失败」二字区域"
   }
 ]
