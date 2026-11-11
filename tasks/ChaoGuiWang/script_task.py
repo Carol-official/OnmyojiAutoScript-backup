@@ -249,16 +249,32 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
     # ------------------------------------------------------------------
     # 步骤 3：等待鬼面图标
     # ------------------------------------------------------------------
-    def wait_demon_icon(self, cfg) -> bool:
-        """只认「自己发现」区域红框内的鬼面图标；未出现则间隔等待，超时返回 False。"""
+    def wait_demon_icon(self, cfg) -> str:
+        """等待「自己发现」区域红框内的鬼面图标，返回三种状态。
+
+        'READY'    鬼面图标已出现，可以召唤鬼王；
+        'EXISTING' 没等到鬼面图标，但界面上已经有可挑战的鬼王（挑战按钮可见、
+                   召唤按钮不可见），此时不必召唤，直接开打，打完同样算击杀一只；
+        'NONE'     超时，且没有可打的鬼王。
+
+        之所以要区分 'EXISTING'：上一只鬼王挑战失败后重进界面、或活动期间
+        已有他人/已发现但未召唤的鬼王时，界面直接停在鬼王卡片 + 挑战按钮，
+        红框里根本不会出现鬼面图标，只等图标就会一直超时空转（实机
+        23:45 因此连续超时并触发 GameStuckError）。
+        """
         timer = Timer(cfg.wait_icon_timeout).start()
         while 1:
             self.screenshot()
             if self.appear(self.I_CGW_DEMON_ICON):
-                return True
+                return 'READY'
+            if (self.appear(self.I_CGW_CHALLENGE)
+                    and not self.appear(self.I_CGW_SUMMON)):
+                logger.info('界面上已有可挑战的鬼王（挑战按钮可见、无召唤按钮），跳过召唤直接开打')
+                return 'EXISTING'
             if timer.reached():
-                logger.warning(f'等待鬼面图标超时（{cfg.wait_icon_timeout} 秒）')
-                return False
+                logger.warning(f'等待鬼面图标超时（{cfg.wait_icon_timeout} 秒），'
+                               f'且未发现可挑战的鬼王')
+                return 'NONE'
             sleep(cfg.wait_icon_interval)
 
     # ------------------------------------------------------------------
@@ -353,8 +369,14 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
     # 步骤 6~9：召唤、挑战、准备、战斗、结算
     # ------------------------------------------------------------------
     def settle_click_areas(self) -> list:
-        """用户绿框标注的三处结算可点击区域，胜利与失败界面通用。"""
-        return [self.C_CGW_SETTLE_LEFT, self.C_CGW_SETTLE_RIGHT, self.C_CGW_SETTLE_BOTTOM]
+        """结算界面的可点击区域：用户白色框选的四大块，胜利与失败界面通用。
+
+        四块分别是上方长条、左中、右中、底部条状区域，每次随机挑一块、
+        块内再随机取点，避免总点同一处。上方区域的右边界刻意止于 x=1137，
+        避开右侧的礼包/合成/积分按钮列。
+        """
+        return [self.C_CGW_SETTLE_TOP, self.C_CGW_SETTLE_LEFT,
+                self.C_CGW_SETTLE_RIGHT, self.C_CGW_SETTLE_BOTTOM]
 
     def wait_before_click(self, label: str, delay: tuple = BEFORE_CLICK_DELAY) -> float:
         """点击前插入一段随机等待，默认 1.5~3 秒。
@@ -794,8 +816,9 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
             if need_summon:
                 logger.hr(f'超鬼王 已击杀 {killed} 只', 2)
 
-                # 步骤 3：等待鬼面图标
-                if not self.wait_demon_icon(cfg):
+                # 步骤 3：等待鬼面图标；若界面上已有可挑战的鬼王，直接开打
+                demon_state = self.wait_demon_icon(cfg)
+                if demon_state == 'NONE':
                     logger.warning('等待鬼面图标超时，先做界面诊断恢复')
                     timeouts += 1
                     recovered = self.diagnose_and_recover('等待鬼面图标')
@@ -807,13 +830,18 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
                         break
                     continue
 
-                # 任意模式下，门票打空都直接结束
-                if self.is_ticket_empty():
-                    self.push('超鬼王·任务完成',
-                              f'所有鬼王门票已打完（图标显示金色鬼面），任务结束。'
-                              f'共击杀 {killed} 只。',
-                              enabled=cfg.notify_task_complete)
-                    break
+                if demon_state == 'EXISTING':
+                    # 已有现成鬼王：不必召唤，直接点「挑战」；打完同样计一只
+                    logger.info('已识别到现成鬼王，本轮跳过召唤，直接挑战')
+                    need_summon = False
+                else:
+                    # 任意模式下，门票打空都直接结束（金色鬼面图标只在召唤界面出现）
+                    if self.is_ticket_empty():
+                        self.push('超鬼王·任务完成',
+                                  f'所有鬼王门票已打完（图标显示金色鬼面），任务结束。'
+                                  f'共击杀 {killed} 只。',
+                                  enabled=cfg.notify_task_complete)
+                        break
 
                 # 步骤 4：疲劳度判定（严格「超过」阈值才停止）
                 fatigue = self.get_fatigue()
@@ -831,19 +859,24 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
                               enabled=cfg.notify_fatigue_limit)
                     break
 
-                # 步骤 5：星级判定
-                star = self.read_star_with_retry()
-                if star:
-                    logger.info(f'识别到鬼王星级：{STAR_NAMES.get(star, star)}')
-                else:
-                    logger.warning('未能识别鬼王星级，按允许处理继续战斗')
-                if by_star and star and not self.star_allowed(star, cfg):
-                    self.push('超鬼王·打完所选星级鬼王',
-                              f'识别到 {STAR_NAMES.get(star, star)} 鬼王，不在勾选的星级范围内，'
-                              f'说明所选星级已打完，任务结束。'
-                              f'已击杀 {killed} 只。',
-                              enabled=cfg.notify_star_cleared)
-                    break
+                # 步骤 5：星级判定。勾玉排只存在于召唤界面，
+                # 现成鬼王的挑战界面上读不到星级，此时不做星级拦截、直接开打
+                star = 0
+                if demon_state == 'READY':
+                    star = self.read_star_with_retry()
+                    if star:
+                        logger.info(f'识别到鬼王星级：{STAR_NAMES.get(star, star)}')
+                    else:
+                        logger.warning('未能识别鬼王星级，按允许处理继续战斗')
+                    if by_star and star and not self.star_allowed(star, cfg):
+                        self.push('超鬼王·打完所选星级鬼王',
+                                  f'识别到 {STAR_NAMES.get(star, star)} 鬼王，不在勾选的星级范围内，'
+                                  f'说明所选星级已打完，任务结束。'
+                                  f'已击杀 {killed} 只。',
+                                  enabled=cfg.notify_star_cleared)
+                        break
+                elif by_star:
+                    logger.info('现成鬼王界面没有星级勾玉排，本轮不做星级筛选，直接挑战')
 
             # 步骤 6~9：打一轮
             result = self.fight_once(cfg, need_summon)

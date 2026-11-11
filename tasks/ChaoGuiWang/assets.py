@@ -18,12 +18,14 @@ class ChaoGuiWangAssets:
 	C_CGW_BOTTOM_BUTTON = RuleClick(roi_front=(1100,560,155,140), roi_back=(1100,560,155,140), name="cgw_bottom_button")
 	# 战斗准备界面右下角「准备」鼓形按钮的中心区域 
 	C_CGW_PREPARE_CLICK = RuleClick(roi_front=(1145,545,70,70), roi_back=(1145,545,70,70), name="cgw_prepare_click")
-	# 结算界面用户标注的左侧可点击区域
-	C_CGW_SETTLE_LEFT = RuleClick(roi_front=(15,35,250,390), roi_back=(15,35,250,390), name="cgw_settle_left")
-	# 结算界面用户标注的右侧可点击区域 
-	C_CGW_SETTLE_RIGHT = RuleClick(roi_front=(1040,70,220,415), roi_back=(1040,70,220,415), name="cgw_settle_right")
-	# 结算界面用户标注的下方可点击区域 
-	C_CGW_SETTLE_BOTTOM = RuleClick(roi_front=(50,605,1150,85), roi_back=(50,605,1150,85), name="cgw_settle_bottom")
+	# 结算界面白色框选的上方区域，右边界止于 1137 以避开右侧礼包/合成/积分按钮列
+	C_CGW_SETTLE_TOP = RuleClick(roi_front=(27,67,1110,212), roi_back=(27,67,1110,212), name="cgw_settle_top")
+	# 结算界面白色框选的左中区域
+	C_CGW_SETTLE_LEFT = RuleClick(roi_front=(27,234,319,294), roi_back=(27,234,319,294), name="cgw_settle_left")
+	# 结算界面白色框选的右中区域
+	C_CGW_SETTLE_RIGHT = RuleClick(roi_front=(833,267,229,258), roi_back=(833,267,229,258), name="cgw_settle_right")
+	# 结算界面白色框选的底部条状区域
+	C_CGW_SETTLE_BOTTOM = RuleClick(roi_front=(37,565,835,63), roi_back=(37,565,835,63), name="cgw_settle_bottom")
 
 
 	# Image Rule Assets
