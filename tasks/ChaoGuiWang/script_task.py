@@ -58,6 +58,10 @@ PREPARE_RETRY_LIMIT = 6         # 最多补点次数
 # 只在这两个按钮已经稳定出现之后等待，既模拟人工反应，也错开界面切换动画。
 BEFORE_CLICK_DELAY = (1.5, 3.0)
 
+# 庭院活动入口的尝试次数。图标在右侧活动列五个槽位里的位置不固定，
+# 每次尝试都重新全列搜索并点命中位置，搜索不到才切换活动栏分页。
+ENTRY_RETRY_LIMIT = 6
+
 # 超时后界面诊断与流程恢复的边界，避免恢复逻辑本身变成新的死循环
 RECOVER_TIMEOUT = 120           # 单次恢复最长秒数
 RECOVER_MAX_ACTIONS = 15        # 单次恢复最多执行多少个「推进动作」
@@ -127,15 +131,39 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
     # ------------------------------------------------------------------
     # 步骤 1：从庭院进入活动
     # ------------------------------------------------------------------
+    def match_cgw_entry(self):
+        """在右侧活动列里找出当前帧命中入口模板的规则对象，未命中返回 None。
+
+        超鬼王图标的槽位不固定（右侧活动列五个槽位都可能出现），所以两个
+        模板的搜索区都放大到了整列（`1140,110,145,450`）。RuleImage.match()
+        命中后会把 roi_front 改写成实际命中的绝对坐标，因此点击必须取
+        `front_center()`，不能再点写死的固定点。
+        """
+        for image in (self.I_CGW_ENTRY, self.I_CGW_ENTRY_ALT):
+            if self.appear(image):
+                return image
+        return None
+
     def cgw_entry_visible(self) -> bool:
-        """庭院右侧是否存在超鬼王图标。
+        """庭院右侧活动列是否存在超鬼王图标。
 
         模板只取圆形图标内部的蓝色法阵核心（38x38），不含会随动画变化的
         金色外圈、飘带、竖排文字和光晕。五张不同帧的实机截图上分数稳定在
-        0.95 以上，其它界面最高仅 0.39，因此阈值可以提到 0.7。
+        0.95 以上，其它界面最高仅 0.43，因此阈值可以提到 0.7。
         仍保留两个不同帧的核心模板作为兜底，任一命中即认为图标存在。
         """
-        return self.appear(self.I_CGW_ENTRY) or self.appear(self.I_CGW_ENTRY_ALT)
+        return self.match_cgw_entry() is not None
+
+    def click_cgw_entry(self) -> bool:
+        """点击当前帧命中的入口图标；没命中就不点，避免误点其它活动图标。"""
+        self.screenshot()
+        image = self.match_cgw_entry()
+        if image is None:
+            return False
+        x, y = image.front_center()
+        self.device.click(x, y, control_name='CGW_ENTRY')
+        logger.info(f'点击右侧活动列 ({x},{y}) 处的超鬼王图标')
+        return True
 
     def wait_huozhu_page(self, timeout: int = 15) -> bool:
         """点击入口后等待活动界面出现；入口图标连续消失 3 帧也视为已离开庭院。"""
@@ -160,21 +188,27 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
             sleep(0.5)
 
     def enter_activity(self) -> bool:
-        """步骤 1：点击庭院右侧的超鬼王活动图标。
+        """步骤 1：点击庭院右侧活动列里的超鬼王活动图标。
 
-        不再复用 RightActivity.enter()：该组件在目标识别失败时会无限点击切换按钮，
+        图标在右侧活动列的五个槽位里位置不固定，所以先全列搜索模板，
+        命中后点命中的那个圆心；搜索不到才去切换活动栏分页。
+        不复用 RightActivity.enter()：该组件在目标识别失败时会无限点击切换按钮，
         既会把活动栏切到没有超鬼王的一页，又会触发 GameTooManyClickError。
-        这里改为「确认图标 → 固定区域点击 → 校验已离开庭院」，最多尝试 4 次。
         """
-        for attempt in range(1, 5):
-            self.screenshot()
-            if not self.cgw_entry_visible():
-                logger.info(f'第 {attempt}/4 次：右侧活动栏未见超鬼王图标，切换活动栏')
-                self.appear_then_click(self.I_TOGGLE_BUTTON, interval=2)
+        entry_misses = 0
+        for attempt in range(1, ENTRY_RETRY_LIMIT + 1):
+            if not self.click_cgw_entry():
+                entry_misses += 1
+                logger.info(f'第 {attempt}/{ENTRY_RETRY_LIMIT} 次：活动列未见超鬼王图标'
+                            f'（连续 {entry_misses} 次）')
+                # 只是加载慢的话再截一帧就够；连续两次都没有才切活动栏分页
+                if entry_misses >= 2 and entry_misses % 2 == 0:
+                    logger.info('连续未见图标，切换活动栏分页再找')
+                    self.appear_then_click(self.I_TOGGLE_BUTTON, interval=2)
                 sleep(1.5)
                 continue
-            logger.info(f'第 {attempt}/4 次：点击庭院右侧超鬼王活动图标')
-            self.click(self.C_CGW_ENTRY_CLICK)
+            entry_misses = 0
+            logger.info(f'第 {attempt}/{ENTRY_RETRY_LIMIT} 次：已点击入口，等待活动界面')
             if self.wait_huozhu_page(timeout=15):
                 logger.info('已进入超鬼王活动界面')
                 return True
@@ -617,11 +651,14 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
                 logger.info('活动主界面 → 点击「祸主降临」')
                 sleep(1.5)
             elif page == 'COURTYARD':
-                # 第 1 步：还在庭院，重新点右侧超鬼王入口
-                self.click(self.C_CGW_ENTRY_CLICK, interval=2)
-                self.device.click_record_clear()
-                logger.info('庭院 → 点击右侧超鬼王活动图标')
-                sleep(2)
+                # 第 1 步：还在庭院，重新找活动列里的超鬼王图标再点（位置不固定）
+                if self.click_cgw_entry():
+                    self.device.click_record_clear()
+                    logger.info('庭院 → 点击右侧活动列里的超鬼王活动图标')
+                    sleep(2)
+                else:
+                    logger.warning('庭院里没找到超鬼王图标，等待活动列刷新')
+                    sleep(1.5)
             else:
                 # 界面未知：通常是子页面或弹窗，按通用返回/确认逐个尝试
                 unknown += 1

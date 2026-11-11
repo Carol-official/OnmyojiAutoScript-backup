@@ -3,19 +3,19 @@
     "itemName": "cgw_entry",
     "imageName": "cgw_cgw_entry.png",
     "roiFront": "1186,220,38,38",
-    "roiBack": "1160,200,100,90",
+    "roiBack": "1140,110,145,450",
     "method": "Template matching",
     "threshold": 0.7,
-    "description": "庭院右侧超鬼王圆形图标内部的蓝色法阵核心（不含金边、飘带、竖排文字与光效，动画帧A）"
+    "description": "庭院右侧超鬼王圆形图标内部的蓝色法阵核心（不含金边、飘带、竖排文字与光效，动画帧A）；搜索区覆盖右侧活动列全部五个槽位，图标出现在哪个槽位都能命中"
   },
   {
     "itemName": "cgw_entry_alt",
     "imageName": "cgw_cgw_entry_alt.png",
     "roiFront": "1186,220,38,38",
-    "roiBack": "1160,200,100,90",
+    "roiBack": "1140,110,145,450",
     "method": "Template matching",
     "threshold": 0.7,
-    "description": "超鬼王圆形图标内部蓝色法阵核心（动画帧B，作为核心区域的兜底帧）"
+    "description": "超鬼王圆形图标内部蓝色法阵核心（动画帧B，作为核心区域的兜底帧）；搜索区同样覆盖右侧活动列五个槽位"
   },
   {
     "itemName": "cgw_huozhu",
