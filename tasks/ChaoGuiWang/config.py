@@ -26,6 +26,28 @@ class ChaoGuiWangConfig(ConfigBase):
     max_consecutive_timeout: int = Field(default=3, ge=1, le=20,
                                          description='连续超时达到该次数后推送并结束任务，避免无限重试')
 
+    # ---------------- 消息推送开关 ----------------
+    # 总开关 + 每个推送场景各自的开关，默认全部开启，保持原有推送行为。
+    # 只想收关键通知时可以只留总开关和「任务完成」，把超时类推送逐个关掉。
+    notify_enable: bool = Field(default=True,
+                                description='消息推送总开关，关闭后本任务的所有推送都不再发送')
+    notify_entry_failed: bool = Field(default=True,
+                                      description='未找到庭院超鬼王活动入口时是否推送')
+    notify_open_failed: bool = Field(default=True,
+                                     description='进入「祸主降临」界面失败时是否推送')
+    notify_wait_icon_timeout: bool = Field(default=True,
+                                           description='第3步等待鬼面图标超时时是否推送')
+    notify_fatigue_ocr_failed: bool = Field(default=True,
+                                            description='右上角疲劳度识别失败时是否推送')
+    notify_fatigue_limit: bool = Field(default=True,
+                                       description='疲劳度超过阈值、任务停止时是否推送')
+    notify_round_timeout: bool = Field(default=True,
+                                       description='单轮召唤/挑战/准备/结算超时时是否推送')
+    notify_task_complete: bool = Field(default=True,
+                                       description='达到设定击杀数量、任务正常完成时是否推送')
+    notify_task_aborted: bool = Field(default=True,
+                                      description='连续超时等原因导致任务提前结束时是否推送')
+
 
 class ChaoGuiWang(ConfigBase):
     scheduler: Scheduler = Field(default_factory=Scheduler)

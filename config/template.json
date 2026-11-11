@@ -1612,7 +1612,16 @@
       "wait_icon_timeout": 40,
       "wait_icon_interval": 5,
       "battle_timeout": 200,
-      "max_consecutive_timeout": 3
+      "max_consecutive_timeout": 3,
+      "notify_enable": true,
+      "notify_entry_failed": true,
+      "notify_open_failed": true,
+      "notify_wait_icon_timeout": true,
+      "notify_fatigue_ocr_failed": true,
+      "notify_fatigue_limit": true,
+      "notify_round_timeout": true,
+      "notify_task_complete": true,
+      "notify_task_aborted": true
     }
   }
 }
