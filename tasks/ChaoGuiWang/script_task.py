@@ -285,10 +285,11 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
         return last or 0
 
     def star_allowed(self, star: int, cfg) -> bool:
-        """当前星级是否在勾选范围内；三个开关都没勾时按全打处理，避免一进来就结束。"""
-        if not (cfg.star_rank_1_4 or cfg.star_rank_5 or cfg.star_rank_6):
-            logger.warning('星级模式的三个开关都未勾选，本次按「所有星级都打」处理')
-            return True
+        """当前星级是否在勾选范围内。
+
+        三个开关都没勾时不做兜底：任务在主流程开头就直接结束，
+        这里一律返回 False，避免配置缺失时误打未勾选的星级。
+        """
         if cfg.star_rank_1_4 and 1 <= star <= 4:
             return True
         if cfg.star_rank_5 and star == 5:
@@ -656,6 +657,14 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
                     + ('' if by_star else f'，目标 {cfg.kill_count} 只')
                     + (f'，星级开关 1-4星={cfg.star_rank_1_4} '
                        f'5星={cfg.star_rank_5} 6星={cfg.star_rank_6}' if by_star else ''))
+
+        # 星级模式下三个星级开关都没勾时没有任何可打目标，不切御魂、不进游戏，直接退出
+        if by_star and not (cfg.star_rank_1_4 or cfg.star_rank_5 or cfg.star_rank_6):
+            logger.error('结束条件为「按星级」但【打1至4星鬼王】【打5星鬼王】【打6星鬼王】'
+                         '一个都没勾选，没有可攻打的目标，任务直接结束。'
+                         '请至少勾选一个星级，或把结束条件改为「按数量」。')
+            self.set_next_run(task='ChaoGuiWang', success=False, finish=True)
+            raise TaskEnd('ChaoGuiWang')
 
         # 全局要求 a：执行任务前切换御魂预设
         self.switch_soul_before_run(conf.switch_soul_config)
