@@ -66,7 +66,64 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
         self.goto_page(page_main)
 
     # ------------------------------------------------------------------
-    # 步骤 1、2：进入活动
+    # 步骤 1：从庭院进入活动
+    # ------------------------------------------------------------------
+    def cgw_entry_visible(self) -> bool:
+        """庭院右侧是否存在超鬼王图标。
+
+        该图标带持续光效动画，单帧模板分数会在 0.62~0.96 间波动，
+        因此用两个不同动画帧的模板，任一命中即认为图标存在。
+        """
+        return self.appear(self.I_CGW_ENTRY) or self.appear(self.I_CGW_ENTRY_ALT)
+
+    def wait_huozhu_page(self, timeout: int = 15) -> bool:
+        """点击入口后等待活动界面出现；入口图标连续消失 3 帧也视为已离开庭院。"""
+        timer = Timer(timeout).start()
+        gone_count = 0
+        while 1:
+            self.screenshot()
+            if self.appear(self.I_CGW_HUOZHU) or self.appear(self.I_CGW_DEMON_ICON):
+                return True
+            # 不依赖活动主界面模板；连续 3 帧不见入口图标才判定已离开庭院，
+            # 避免图标光效动画的某一帧同时躲过两个模板而造成误判
+            if self.cgw_entry_visible():
+                gone_count = 0
+            else:
+                gone_count += 1
+                if gone_count >= 3:
+                    return True
+            if self.ui_reward_appear_click():
+                continue
+            if timer.reached():
+                return False
+            sleep(0.5)
+
+    def enter_activity(self) -> bool:
+        """步骤 1：点击庭院右侧的超鬼王活动图标。
+
+        不再复用 RightActivity.enter()：该组件在目标识别失败时会无限点击切换按钮，
+        既会把活动栏切到没有超鬼王的一页，又会触发 GameTooManyClickError。
+        这里改为「确认图标 → 固定区域点击 → 校验已离开庭院」，最多尝试 4 次。
+        """
+        for attempt in range(1, 5):
+            self.screenshot()
+            if not self.cgw_entry_visible():
+                logger.info(f'第 {attempt}/4 次：右侧活动栏未见超鬼王图标，切换活动栏')
+                self.appear_then_click(self.I_TOGGLE_BUTTON, interval=2)
+                sleep(1.5)
+                continue
+            logger.info(f'第 {attempt}/4 次：点击庭院右侧超鬼王活动图标')
+            self.click(self.C_CGW_ENTRY_CLICK)
+            if self.wait_huozhu_page(timeout=15):
+                logger.info('已进入超鬼王活动界面')
+                return True
+            logger.warning('点击入口后仍停在庭院，返回庭院重试')
+            self.goto_page(page_main)
+            sleep(1)
+        return False
+
+    # ------------------------------------------------------------------
+    # 步骤 2：点击祸主降临
     # ------------------------------------------------------------------
     def open_huozhu(self) -> bool:
         """点击「祸主降临」，直到第 3 步的鬼面图标出现。"""
@@ -214,7 +271,11 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
         self.switch_soul_before_run(conf.switch_soul_config)
 
         # 步骤 1、2：庭院 → 活动图标 → 祸主降临
-        self.enter(self.I_CGW_ENTRY)
+        if not self.enter_activity():
+            self.push('超鬼王·未找到活动入口',
+                      '庭院右侧未能进入超鬼王活动，已尝试切换活动栏 4 次，任务结束，请检查活动是否已开放。')
+            self.set_next_run(task='ChaoGuiWang', success=False, finish=True)
+            raise TaskEnd('ChaoGuiWang')
         if not self.open_huozhu():
             self.push('超鬼王·进入活动失败', '未能进入「祸主降临」界面，任务结束，请检查活动是否已开放。')
             self.set_next_run(task='ChaoGuiWang', success=False, finish=True)

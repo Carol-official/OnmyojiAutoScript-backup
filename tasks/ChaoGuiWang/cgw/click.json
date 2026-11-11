@@ -1,5 +1,11 @@
 [
   {
+    "itemName": "cgw_entry_click",
+    "roiFront": "1160,215,60,60",
+    "roiBack": "1160,215,60,60",
+    "description": "庭院右侧超鬼王图标主体的固定点击区域"
+  },
+  {
     "itemName": "cgw_huozhu_click",
     "roiFront": "900,70,45,180",
     "roiBack": "900,70,45,180",

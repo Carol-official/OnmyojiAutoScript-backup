@@ -5,8 +5,17 @@
     "roiFront": "1170,200,90,80",
     "roiBack": "1120,150,160,220",
     "method": "Template matching",
-    "threshold": 0.75,
-    "description": "庭院右侧超鬼王活动入口图标"
+    "threshold": 0.5,
+    "description": "庭院右侧超鬼王活动入口图标（动画帧A，阈值调低以应对光效变化）"
+  },
+  {
+    "itemName": "cgw_entry_alt",
+    "imageName": "cgw_cgw_entry_alt.png",
+    "roiFront": "1170,200,90,80",
+    "roiBack": "1120,150,160,220",
+    "method": "Template matching",
+    "threshold": 0.5,
+    "description": "庭院右侧超鬼王活动入口图标（动画帧B）"
   },
   {
     "itemName": "cgw_huozhu",
@@ -14,7 +23,7 @@
     "roiFront": "890,55,70,215",
     "roiBack": "830,20,220,300",
     "method": "Template matching",
-    "threshold": 0.75,
+    "threshold": 0.65,
     "description": "活动主界面祸主降临竖排文字"
   },
   {

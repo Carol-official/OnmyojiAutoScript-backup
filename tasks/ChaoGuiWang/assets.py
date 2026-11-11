@@ -12,6 +12,8 @@ class ChaoGuiWangAssets:
 
 
 	# Click Rule Assets
+	# 庭院右侧超鬼王图标主体的固定点击区域 
+	C_CGW_ENTRY_CLICK = RuleClick(roi_front=(1160,215,60,60), roi_back=(1160,215,60,60), name="cgw_entry_click")
 	# 祸主降临文字的点击区域 
 	C_CGW_HUOZHU_CLICK = RuleClick(roi_front=(900,70,45,180), roi_back=(900,70,45,180), name="cgw_huozhu_click")
 	# 右下角召唤鬼王与挑战按钮的统一点击区域 
@@ -26,9 +28,11 @@ class ChaoGuiWangAssets:
 
 	# Image Rule Assets
 	# 庭院右侧超鬼王活动入口图标 
-	I_CGW_ENTRY = RuleImage(roi_front=(1170,200,90,80), roi_back=(1120,150,160,220), threshold=0.75, method="Template matching", file="./tasks/ChaoGuiWang/cgw/cgw_cgw_entry.png")
+	I_CGW_ENTRY = RuleImage(roi_front=(1170,200,90,80), roi_back=(1120,150,160,220), threshold=0.5, method="Template matching", file="./tasks/ChaoGuiWang/cgw/cgw_cgw_entry.png")
+	# 同一入口图标的另一动画帧，两帧任一命中即视为图标存在 
+	I_CGW_ENTRY_ALT = RuleImage(roi_front=(1170,200,90,80), roi_back=(1120,150,160,220), threshold=0.5, method="Template matching", file="./tasks/ChaoGuiWang/cgw/cgw_cgw_entry_alt.png")
 	# 活动主界面祸主降临竖排文字 
-	I_CGW_HUOZHU = RuleImage(roi_front=(890,55,70,215), roi_back=(830,20,220,300), threshold=0.75, method="Template matching", file="./tasks/ChaoGuiWang/cgw/cgw_cgw_huozhu.png")
+	I_CGW_HUOZHU = RuleImage(roi_front=(890,55,70,215), roi_back=(830,20,220,300), threshold=0.65, method="Template matching", file="./tasks/ChaoGuiWang/cgw/cgw_cgw_huozhu.png")
 	# 自己发现区域的鬼面图标，用于判定第3步界面已就绪 
 	I_CGW_DEMON_ICON = RuleImage(roi_front=(145,140,68,76), roi_back=(100,110,230,160), threshold=0.8, method="Template matching", file="./tasks/ChaoGuiWang/cgw/cgw_cgw_demon_icon.png")
 	# 右下角召唤鬼王按钮 
