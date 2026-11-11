@@ -351,19 +351,34 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
             sleep(1)
         return last or 0
 
+    # 星级 → 配置字段名。协战任务继承本类，但它的星级开关叫 invite_star_N，会覆盖这张表。
+    STAR_FLAG_FIELDS = {
+        1: 'star_rank_1',
+        2: 'star_rank_2',
+        3: 'star_rank_3',
+        4: 'star_rank_4',
+        5: 'star_rank_5',
+        6: 'star_rank_6',
+    }
+
+    def star_flags(self, cfg) -> dict:
+        """返回 {星级: 是否勾选}，字段名取自 STAR_FLAG_FIELDS。"""
+        return {rank: bool(getattr(cfg, field, False))
+                for rank, field in self.STAR_FLAG_FIELDS.items()}
+
+    def selected_stars_text(self, cfg) -> str:
+        """把已勾选的星级拼成「1星、3星」这样的短文本，用于日志。"""
+        flags = self.star_flags(cfg)
+        picked = [f'{rank}星' for rank in sorted(flags) if flags[rank]]
+        return '、'.join(picked) if picked else '无'
+
     def star_allowed(self, star: int, cfg) -> bool:
         """当前星级是否在勾选范围内。
 
-        三个开关都没勾时不做兜底：任务在主流程开头就直接结束，
+        六个开关都没勾时不做兜底：任务在主流程开头就直接结束，
         这里一律返回 False，避免配置缺失时误打未勾选的星级。
         """
-        if cfg.star_rank_1_4 and 1 <= star <= 4:
-            return True
-        if cfg.star_rank_5 and star == 5:
-            return True
-        if cfg.star_rank_6 and star == 6:
-            return True
-        return False
+        return self.star_flags(cfg).get(star, False)
 
     # ------------------------------------------------------------------
     # 步骤 6~9：召唤、挑战、准备、战斗、结算
@@ -767,12 +782,11 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
 
         logger.info(f'结束条件：{cfg.target_mode.value}'
                     + ('' if by_star else f'，目标 {cfg.kill_count} 只')
-                    + (f'，星级开关 1-4星={cfg.star_rank_1_4} '
-                       f'5星={cfg.star_rank_5} 6星={cfg.star_rank_6}' if by_star else ''))
+                    + (f'，星级开关：{self.selected_stars_text(cfg)}' if by_star else ''))
 
-        # 星级模式下三个星级开关都没勾时没有任何可打目标，不切御魂、不进游戏，直接退出
-        if by_star and not (cfg.star_rank_1_4 or cfg.star_rank_5 or cfg.star_rank_6):
-            logger.error('结束条件为「按星级」但【打1至4星鬼王】【打5星鬼王】【打6星鬼王】'
+        # 星级模式下六个星级开关都没勾时没有任何可打目标，不切御魂、不进游戏，直接退出
+        if by_star and not any(self.star_flags(cfg).values()):
+            logger.error('结束条件为「按星级」但六个星级开关（打1星 ~ 打6星鬼王）'
                          '一个都没勾选，没有可攻打的目标，任务直接结束。'
                          '请至少勾选一个星级，或把结束条件改为「按数量」。')
             self.set_next_run(task='ChaoGuiWang', success=False, finish=True)

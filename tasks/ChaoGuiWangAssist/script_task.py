@@ -18,7 +18,7 @@
 邀请模式：
     4. 等「自己发现」红框内的鬼面图标出现（已有自己的鬼王卡片则跳过召唤）
     5. 识别鬼王星级（圆形图标下方橙色勾玉个数），只处理勾选的星级；
-       三个星级开关全不勾时任务启动即退出，识别到未勾选星级则推送并结束
+       六个星级开关全不勾时任务启动即退出，识别到未勾选星级则推送并结束
     6. 不判疲劳、不点挑战：点「召唤鬼王」，再点卡片右上角的「集结」印章
     7. 分享弹窗里只找配置指定的那一位好友（好友页签 → 寮友页签），
        点中他再点「邀请」；两个页签都没有就关掉弹窗、不邀请任何人并结束任务
@@ -74,6 +74,17 @@ SHARE_BLANK_POINTS = [(170, 600), (170, 500)]
 
 class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
     """超鬼王协战：邀请模式 / 协战模式。"""
+
+    # 本任务的星级开关叫 invite_star_N（界面显示「邀请N星鬼王」），
+    # 覆盖父类默认的 star_rank_N，两套配置互不干扰
+    STAR_FLAG_FIELDS = {
+        1: 'invite_star_1',
+        2: 'invite_star_2',
+        3: 'invite_star_3',
+        4: 'invite_star_4',
+        5: 'invite_star_5',
+        6: 'invite_star_6',
+    }
 
     # 点击前随机等待的「已等待」豁免截止时间，避开父类自带的等待造成双重等待
     _skip_click_deadline = 0.0
@@ -692,12 +703,13 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
         conf = self.config.chao_gui_wang_assist
         cfg = conf.chao_gui_wang_assist_config
         mode = cfg.mode
-        logger.info(f'超鬼王协战启动，模式：{mode.value}')
+        logger.info(f'超鬼王协战启动，模式：{mode.value}'
+                    + (f'，邀请星级：{self.selected_stars_text(cfg)}'
+                       if mode == ChaoGuiWangAssistMode.INVITE else ''))
 
-        # 邀请模式下三个星级开关都没勾时没有任何可分享的目标，不进游戏，直接退出
-        if mode == ChaoGuiWangAssistMode.INVITE and not (
-                cfg.star_rank_1_4 or cfg.star_rank_5 or cfg.star_rank_6):
-            logger.error('模式为「邀请模式」但【打1至4星鬼王】【打5星鬼王】【打6星鬼王】'
+        # 邀请模式下六个星级开关都没勾时没有任何可分享的目标，不进游戏，直接退出
+        if mode == ChaoGuiWangAssistMode.INVITE and not any(self.star_flags(cfg).values()):
+            logger.error('模式为「邀请模式」但六个星级开关（邀请1星 ~ 邀请6星鬼王）'
                          '一个都没勾选，没有可召唤分享的目标，任务直接结束。'
                          '请至少勾选一个星级，或把模式改为「协战模式」。')
             self.set_next_run(task=TASK_NAME, success=False, finish=True)

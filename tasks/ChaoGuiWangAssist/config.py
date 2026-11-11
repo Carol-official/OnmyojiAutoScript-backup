@@ -7,7 +7,7 @@
 """
 from enum import Enum
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from tasks.Component.SwitchSoul.switch_soul_config import SwitchSoulConfig
 from tasks.Component.config_base import ConfigBase
@@ -29,12 +29,42 @@ class ChaoGuiWangAssistConfig(ConfigBase):
 
     # ---------------- 邀请模式：召唤与分享的星级 ----------------
     # 勾选哪些星级就只召唤并分享哪些星级；识别到未勾选的星级说明该打的都打完了，任务结束。
-    star_rank_1_4: bool = Field(default=True,
-                                description='召唤并分享 1 至 4 星鬼王（邀请模式生效）')
-    star_rank_5: bool = Field(default=False,
-                              description='召唤并分享 5 星鬼王（邀请模式生效）')
-    star_rank_6: bool = Field(default=False,
-                              description='召唤并分享 6 星鬼王（邀请模式生效）')
+    # 用 invite_star_ 前缀（显示为「邀请N星鬼王」），与超鬼王任务的 star_rank_ 区分开，
+    # 避免两个任务共用同一组多语言条目。
+    invite_star_1: bool = Field(default=True,
+                                description='召唤并分享 1 星鬼王（邀请模式生效）')
+    invite_star_2: bool = Field(default=True,
+                                description='召唤并分享 2 星鬼王（邀请模式生效）')
+    invite_star_3: bool = Field(default=True,
+                                description='召唤并分享 3 星鬼王（邀请模式生效）')
+    invite_star_4: bool = Field(default=True,
+                                description='召唤并分享 4 星鬼王（邀请模式生效）')
+    invite_star_5: bool = Field(default=False,
+                                description='召唤并分享 5 星鬼王（邀请模式生效）')
+    invite_star_6: bool = Field(default=False,
+                                description='召唤并分享 6 星鬼王（邀请模式生效）')
+
+    @model_validator(mode='before')
+    @classmethod
+    def migrate_star_rank_1_4(cls, data):
+        """旧配置用「1至4星 / 5星 / 6星」三个开关，加载时展开成 invite_star_1~6。
+
+        只在旧字段存在、且 invite_star_ 一个都没写的情况下生效，不会覆盖用户的新设置。
+        """
+        if not isinstance(data, dict):
+            return data
+        new_keys = tuple(f'invite_star_{rank}' for rank in range(1, 7))
+        if any(key in data for key in new_keys):
+            return data
+        old_keys = ('star_rank_1_4', 'star_rank_5', 'star_rank_6')
+        if not any(key in data for key in old_keys):
+            return data
+        old_1_4 = bool(data.get('star_rank_1_4', True))
+        for rank in range(1, 5):
+            data[f'invite_star_{rank}'] = old_1_4
+        data['invite_star_5'] = bool(data.get('star_rank_5', False))
+        data['invite_star_6'] = bool(data.get('star_rank_6', False))
+        return data
     share_friend_name: str = Field(default='',
                                    description='分享目标好友名，须与分享弹窗中的名字完全一致。'
                                                '邀请模式只邀请这一位好友，不会改邀请列表里的其他人；'

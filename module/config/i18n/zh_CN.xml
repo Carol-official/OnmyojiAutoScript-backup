@@ -265,9 +265,18 @@
 	<message><source>Battle Timeout</source><translation>单场战斗超时(秒)</translation></message>
 	<message><source>Max Consecutive Timeout</source><translation>连续超时上限</translation></message>
 	<message><source>Target Mode</source><translation>结束条件</translation></message>
-	<message><source>Star Rank 1 4</source><translation>打1至4星鬼王</translation></message>
+	<message><source>Star Rank 1</source><translation>打1星鬼王</translation></message>
+	<message><source>Star Rank 2</source><translation>打2星鬼王</translation></message>
+	<message><source>Star Rank 3</source><translation>打3星鬼王</translation></message>
+	<message><source>Star Rank 4</source><translation>打4星鬼王</translation></message>
 	<message><source>Star Rank 5</source><translation>打5星鬼王</translation></message>
 	<message><source>Star Rank 6</source><translation>打6星鬼王</translation></message>
+	<message><source>Invite Star 1</source><translation>邀请1星鬼王</translation></message>
+	<message><source>Invite Star 2</source><translation>邀请2星鬼王</translation></message>
+	<message><source>Invite Star 3</source><translation>邀请3星鬼王</translation></message>
+	<message><source>Invite Star 4</source><translation>邀请4星鬼王</translation></message>
+	<message><source>Invite Star 5</source><translation>邀请5星鬼王</translation></message>
+	<message><source>Invite Star 6</source><translation>邀请6星鬼王</translation></message>
 	<message><source>Max Consecutive Defeat</source><translation>连续挑战失败上限</translation></message>
 	<message><source>Notify Task Complete</source><translation>任务完成时推送</translation></message>
 	<message><source>Notify Task Failed</source><translation>任务完全失败时推送</translation></message>
