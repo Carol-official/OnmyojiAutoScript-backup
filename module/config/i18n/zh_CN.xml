@@ -283,6 +283,7 @@
 	<message><source>Click Delay Max</source><translation>点击前等待上限(秒)</translation></message>
 	<message><source>Notify No Assist</source><translation>无协战鬼王时推送</translation></message>
 	<message><source>Notify Invite Timeout</source><translation>邀请超时时推送</translation></message>
+	<message><source>Notify Friend Missing</source><translation>未找到指定好友时推送</translation></message>
 	<message><source>Notify Summary</source><translation>任务汇总推送</translation></message>
 	<message>
         <source>Setting</source>

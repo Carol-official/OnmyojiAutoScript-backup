@@ -2,20 +2,26 @@
 """超鬼王协战。
 
 本任务复用「超鬼王（祸主降临）」的入口、星级识别、战斗与结算流程，
-只把「打出鬼王」换成「把鬼王分享给好友」或「协战好友的鬼王」。
+只把「打出鬼王」换成「把鬼王邀请给指定好友」或「协战别人的鬼王」。
 
 公共前置（两种模式一致）：
     1. 庭院点击右侧活动列里的超鬼王图标
     2. 点击「祸主降临」
     3. 进入祸主降临主界面（「自己发现」「好友发现」两块区域可读）
 
+两个模式的边界（严格区分，互不越界）：
+    - 「集结」印章只会出现在「自己发现」的鬼王卡片上，别人分享的鬼王没有；
+    - 邀请模式：只管自己的鬼王 → 召唤 → 集结 → 邀请给指定好友，不点挑战、不切御魂；
+    - 协战模式：只管别人的鬼王 → 不召唤、不集结、不邀请、不打自己发现的鬼王。
+
 --------------------------------------------------------------------
 邀请模式：
-    4. 等「自己发现」红框内的鬼面图标出现（已有鬼王卡片则跳过召唤）
+    4. 等「自己发现」红框内的鬼面图标出现（已有自己的鬼王卡片则跳过召唤）
     5. 识别鬼王星级（圆形图标下方橙色勾玉个数），只处理勾选的星级；
        三个星级开关全不勾时任务启动即退出，识别到未勾选星级则推送并结束
     6. 不判疲劳、不点挑战：点「召唤鬼王」，再点卡片右上角的「集结」印章
-    7. 分享弹窗里按名字找好友（好友页签优先，找不到切寮友），点「邀请」
+    7. 分享弹窗里只找配置指定的那一位好友（好友页签 → 寮友页签），
+       点中他再点「邀请」；两个页签都没有就关掉弹窗、不邀请任何人并结束任务
     8. 每 wait_interval 秒检查一次「自己发现」鬼面是否重新出现：
        重现 = 好友击杀成功 = 邀请成功一次；超过 wait_timeout 则推送提醒后继续等
 
@@ -24,12 +30,14 @@
        - 鬼面空位图标存在 → 没有可协战鬼王，每 wait_interval 秒重查，
          超过 wait_timeout 仍存在则推送「无协战鬼王」并结束
        - 鬼王卡片带「已公开」印章 → 按需求忽略，继续等待
-       - 鬼王卡片带「集结」印章 → 非公开鬼王，点卡片 → 挑战 → 准备 → 结算，
+       - 存在鬼王卡片且没有「已公开」印章 → 非公开鬼王：先点这张卡片把自己
+         的选中目标切到好友的鬼王，再点挑战 → 准备 → 结算，
          出现一次胜利结算即协战成功一只
 
 推送：只保留任务完成、任务完全失败、打完所选星级、无协战鬼王、邀请超时、
-连续协战失败、任务结束汇总七类，各有独立开关，并受 notify_enable 总开关控制；
-按需求，成功次数不在过程中逐条推送，只在结束汇总里给出。
+未找到指定好友、连续协战失败、任务结束汇总八类，各有独立开关，
+并受 notify_enable 总开关控制；按需求，成功次数不在过程中逐条推送，
+只在结束汇总里给出。
 
 所有点击（含继承来的入口、召唤、挑战、准备、结算点击）都会先随机等待
 click_delay_min~click_delay_max 秒（默认 1.5~3 秒），通过重写 click /
@@ -45,6 +53,7 @@ from module.logger import logger
 from tasks.ChaoGuiWang.script_task import ScriptTask as ChaoGuiWangTask, STAR_NAMES
 from tasks.ChaoGuiWangAssist.assets import ChaoGuiWangAssistAssets
 from tasks.ChaoGuiWangAssist.config import ChaoGuiWangAssistMode
+from tasks.GameUi.page import page_main
 
 TASK_NAME = 'ChaoGuiWangAssist'
 
@@ -57,6 +66,10 @@ SHARE_POPUP_TIMEOUT = 20
 CHALLENGE_APPEAR_TIMEOUT = 20
 # 等待超时后允许的连续无进展次数，超过后做一次界面诊断
 WAIT_ROUND_BEFORE_DIAGNOSE = 3
+# 分享弹窗没有关闭按钮，只能点弹窗外的空白处让它收起。
+# 候选点都放在左侧「好友发现」的空白区域（鬼面空位、「暂无好友发现鬼王」文字），
+# 刻意避开右下角「挑战」按钮 —— 那里点了会直接开打，属于邀请模式绝不允许的动作。
+SHARE_BLANK_POINTS = [(170, 600), (170, 500)]
 
 
 class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
@@ -260,24 +273,45 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
     # ------------------------------------------------------------------
     # 邀请模式
     # ------------------------------------------------------------------
+    def ticket_empty_confirmed(self, times: int = 2, interval: float = 1.0) -> bool:
+        """连续多次确认「门票已打完」，避免单帧误判。
+
+        可召唤界面上圆形图标下方有一排橙色勾玉，门票打完时勾玉消失、图标变金色。
+        但界面切换动画期间勾玉可能整帧被遮住，只判一帧会把「正要召唤」误判成
+        「门票已打完」并直接把任务结束掉，所以必须连续两帧都成立才采信
+        （实机日志显示真的有鬼王可召唤时一定是能读到星级的）。
+        """
+        for i in range(times):
+            self.screenshot()
+            if not self.is_ticket_empty():
+                return False
+            if i + 1 < times:
+                sleep(interval)
+        return True
+
     def wait_self_demon(self) -> str:
         """等「自己发现」区域的鬼面图标，返回四种状态。
 
-        'READY'    鬼面图标已出现，可以召唤新鬼王；
-        'EXISTING' 已有鬼王卡片（集结印章可见），跳过召唤直接分享；
-        'EMPTY'    圆形图标变成金色鬼面、下方没有勾玉 → 门票已打完；
+        'READY'    有鬼王可召唤（鬼面图标或「召唤鬼王」按钮可见，且门票没打完）；
+        'EXISTING' 已有自己的鬼王卡片（集结印章可见），跳过召唤直接分享；
+        'EMPTY'    连续确认门票已打完（图标变金色鬼面、下方没有勾玉）；
         'NONE'     超时且以上都不是。
+
+        判定顺序是「已有卡片 → 门票空 → 可召唤」：已有卡片时圆形图标区域
+        可能是空的，先判卡片才能识别出「上一只还没分享完」；门票判定放在
+        可召唤之前，是因为门票打完后鬼面图标依旧存在（实测 0.998 命中），
+        若先判可召唤就会一直停在 READY 上反复点召唤。
         """
         timer = Timer(SELF_DEMON_TIMEOUT).start()
         while 1:
             self.screenshot()
-            if self.appear(self.I_CGW_DEMON_ICON):
-                return 'READY'
             if self.appear(self.I_CGWA_GATHER_SELF):
                 logger.info('「自己发现」已有鬼王卡片，本轮跳过召唤，直接分享')
                 return 'EXISTING'
-            if self.is_ticket_empty():
+            if self.ticket_empty_confirmed():
                 return 'EMPTY'
+            if self.appear(self.I_CGW_DEMON_ICON) or self.appear(self.I_CGW_SUMMON):
+                return 'READY'
             if self.ui_reward_appear_click():
                 continue
             if timer.reached():
@@ -303,7 +337,7 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
                 return 'READY'
             # 卡片还在说明好友还没打完；此时圆形图标区域的金色像素不代表门票耗尽，
             # 所以只在没有卡片时才做门票判定，避免误判成任务完成
-            if not self.appear(self.I_CGWA_GATHER_SELF) and self.is_ticket_empty():
+            if not self.appear(self.I_CGWA_GATHER_SELF) and self.ticket_empty_confirmed():
                 return 'EMPTY'
             if self.ui_reward_appear_click():
                 continue
@@ -338,6 +372,24 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
                 return False
             sleep(0.5)
 
+    def close_share_popup(self, timeout: int = 10) -> bool:
+        """不邀请任何人时把分享弹窗关掉。
+
+        弹窗上没有关闭按钮（右上角只有说明文字），只能点弹窗外的空白处
+        让它自行收起；挨个候选点各试一次，一旦收起立刻返回，避免多点。
+        """
+        self.screenshot()
+        if not self.appear(self.I_CGWA_SHARE):
+            return True
+        for x, y in SHARE_BLANK_POINTS:
+            self._sleep_before_click('分享弹窗外的空白处')
+            self.device.click(x, y, control_name='CGWA_SHARE_BLANK')
+            if self.wait_share_closed(timeout=timeout):
+                logger.info(f'点击空白处 ({x},{y}) 后分享弹窗已关闭')
+                return True
+            logger.warning(f'点击空白处 ({x},{y}) 后分享弹窗仍在，换一个位置再试')
+        return False
+
     def select_friend(self, name: str) -> str:
         """在当前页签里按名字找好友卡片，找到就点一下选中，返回命中的名字。
 
@@ -368,11 +420,14 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
         return ''
 
     def share_to_friend(self, cfg) -> str:
-        """在分享弹窗里选好好友：好友页签 → 寮友页签 → 兜底第一张卡片。"""
+        """在分享弹窗里只找配置指定的那位好友，找到就点一下选中。
+
+        先在「好友」页签找，找不到再切「寮友」页签找（指定好友也可能在寮里）。
+        两个页签都没有就返回空串——绝不改点列表里的其他人，也不点「公开」。
+        """
         name = (cfg.share_friend_name or '').strip()
         if not name:
-            logger.info('未指定分享好友名，直接选列表第一张卡片')
-            self.click(self.C_CGWA_SHARE_CARD_1)
+            logger.error('未填写【分享好友名】：邀请模式只邀请指定好友，不做兜底选择')
             return ''
         picked = self.select_friend(name)
         if picked:
@@ -383,22 +438,31 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
         picked = self.select_friend(name)
         if picked:
             return picked
-        logger.warning(f'「寮友」页签也没有 {name}，改为选第一张卡片')
-        self.click(self.C_CGWA_SHARE_CARD_1)
+        logger.warning(f'「好友」与「寮友」两个页签都没有找到 {name}')
         return ''
 
-    def share_demon(self, cfg) -> bool:
-        """点「集结」→ 选好友 → 点「邀请」→ 等弹窗关闭。"""
+    def share_demon(self, cfg) -> str:
+        """点「集结」→ 选中指定好友 → 点「邀请」→ 等弹窗关闭。
+
+        返回 'OK'             已成功邀请指定好友；
+            'FRIEND_MISSING' 弹窗里没有指定好友，不邀请任何人并关掉弹窗；
+            'FAIL'           集结印章没出现 / 弹窗没打开 / 点了邀请但没关掉。
+        """
         if not self.wait_appear(self.I_CGWA_GATHER_SELF, timeout=CHALLENGE_APPEAR_TIMEOUT):
             logger.warning('未等到「集结」印章，无法分享鬼王')
-            return False
+            return 'FAIL'
         self.click(self.I_CGWA_GATHER_SELF)
         if not self.wait_share_popup():
-            return False
+            return 'FAIL'
         picked = self.share_to_friend(cfg)
-        logger.info(f'分享目标：{picked or "列表第一个好友"}')
+        if not picked:
+            logger.error(f'分享弹窗里没有指定好友「{cfg.share_friend_name}」，'
+                         f'为避免误邀请其他人，本次不做邀请，直接关闭弹窗')
+            self.close_share_popup()
+            return 'FRIEND_MISSING'
+        logger.info(f'已选中指定好友「{picked}」，点击「邀请」')
         self.click(self.C_CGWA_SHARE_INVITE)
-        return self.wait_share_closed()
+        return 'OK' if self.wait_share_closed() else 'FAIL'
 
     def run_invite(self, cfg) -> tuple:
         """邀请模式主循环，返回 (邀请成功次数, 结束原因, 结束类型)。
@@ -446,8 +510,14 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
                                          f'共成功邀请 {invited} 只'), 'FAILED'
                     continue
 
-            # READY 已召唤 / EXISTING 已有卡片：分享给好友
-            if not self.share_demon(cfg):
+            # READY 已召唤 / EXISTING 已有卡片：只分享给指定好友
+            status = self.share_demon(cfg)
+            if status == 'FRIEND_MISSING':
+                # 只邀请特定好友，找不到就不邀请任何人，也不改分享给别人，直接结束
+                return invited, (f'分享弹窗里没有指定好友「{cfg.share_friend_name}」，'
+                                 f'按设置不邀请其他人，任务结束，共成功邀请 {invited} 只'), \
+                       'FRIEND_MISSING'
+            if status != 'OK':
                 timeouts += 1
                 logger.warning(f'分享鬼王失败（连续第 {timeouts} 次），做一次界面诊断')
                 if not self.diagnose_and_recover('分享鬼王') \
@@ -503,16 +573,28 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
         return 'UNKNOWN'
 
     def assist_once(self, cfg) -> str:
-        """点好友鬼王卡片 → 挑战 → 准备 → 结算，返回 'WIN' / 'LOSE' / 'TIMEOUT'。
+        """点好友鬼王卡片 → 挑战 → 准备 → 结算，返回 'WIN' / 'LOSE' / 'GONE' / 'TIMEOUT'。
 
-        协战不需要召唤，直接复用父类的战斗段（need_summon=False）。
+        协战不召唤、也不打自己发现的鬼王：因此每一轮都必须先点「好友发现」的
+        卡片把右侧面板切到好友的鬼王，再点「挑战」。不能像以前那样「挑战按钮
+        已经可见就直接打」——自己发现的鬼王同样会显示挑战按钮，那样会把
+        自己的鬼王打掉。
         """
         self.last_timeout_stage = ''
-        if not self.appear(self.I_CGW_CHALLENGE):
+        self.screenshot()
+        if not self.appear(self.I_CGWA_FRIEND_CARD):
+            logger.info('点卡片前「好友发现」的鬼王卡片已消失（可能被别人打掉了），本轮放弃')
+            return 'GONE'
+        self.click(self.C_CGWA_CARD_FRIEND)
+        sleep(1.0)
+        if not self.wait_appear(self.I_CGW_CHALLENGE, timeout=CHALLENGE_APPEAR_TIMEOUT):
+            # 少数情况下第一次点击只是取消了之前的选中，补点一次再等
+            logger.warning('点击好友鬼王卡片后未出现「挑战」按钮，补点一次卡片')
             self.click(self.C_CGWA_CARD_FRIEND)
             if not self.wait_appear(self.I_CGW_CHALLENGE, timeout=CHALLENGE_APPEAR_TIMEOUT):
                 self.last_timeout_stage = '打开好友鬼王卡片'
                 return 'TIMEOUT'
+        logger.info('已选中「好友发现」的鬼王，开始协战（不召唤、不打自己的鬼王）')
         return self.fight_once(cfg, need_summon=False)
 
     def run_assist(self, cfg) -> tuple:
@@ -555,6 +637,10 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
                     timeouts = 0
                     logger.info(f'协战成功，累计 {assists} 只')
                     continue
+                if result == 'GONE':
+                    # 卡片在点击前消失：不打任何东西，回到循环重新看「好友发现」
+                    logger.info('好友鬼王已消失，重新检查「好友发现」区域')
+                    continue
                 if result == 'LOSE':
                     defeats += 1
                     logger.warning(f'协战失败，连续失败 {defeats}/{cfg.max_consecutive_defeat} 次')
@@ -587,15 +673,16 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
     # 界面诊断：补充本任务独有的分享弹窗
     # ------------------------------------------------------------------
     def diagnose_and_recover(self, stage: str) -> bool:
-        """父类的诊断表里没有分享弹窗，先把它处理掉再交给父类流程恢复。"""
+        """父类的诊断表里没有分享弹窗，先把它处理掉再交给父类流程恢复。
+
+        关弹窗只能点空白处：弹窗里的「邀请」按钮会邀请当前选中的那位好友，
+        在恢复流程里点它等于随便抓一个人赠送鬼王，违反「只邀请指定好友」。
+        """
         self.screenshot()
         if self.appear(self.I_CGWA_SHARE):
-            logger.warning('界面诊断：当前停留在鬼王分享弹窗，先点「邀请」把它关掉')
-            self.click(self.C_CGWA_SHARE_INVITE)
-            if not self.wait_share_closed(timeout=10):
-                logger.warning('分享弹窗仍未关闭，改为点弹窗空白处')
-                self.click(self.C_CGWA_SHARE_CARD_1)
-                self.wait_share_closed(timeout=10)
+            logger.warning('界面诊断：当前停留在鬼王分享弹窗，点空白处关掉它')
+            if not self.close_share_popup(timeout=10):
+                logger.warning('分享弹窗仍未关闭，继续交给父类的通用返回流程')
         return super().diagnose_and_recover(stage)
 
     # ------------------------------------------------------------------
@@ -616,12 +703,27 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
             self.set_next_run(task=TASK_NAME, success=False, finish=True)
             raise TaskEnd(TASK_NAME)
 
+        # 邀请模式：只邀请指定好友，没填好友名就没有目标，不做兜底选择
+        if mode == ChaoGuiWangAssistMode.INVITE and not (cfg.share_friend_name or '').strip():
+            logger.error('模式为「邀请模式」但【分享好友名】为空。邀请模式只把鬼王邀请给'
+                         '指定的那一位好友，不会随便选列表里的其他人，任务直接结束。'
+                         '请填写好友名，或把模式改为「协战模式」。')
+            self.push('超鬼王协战·任务完全失败',
+                      '未填写【分享好友名】，邀请模式只邀请指定好友、不做兜底选择，任务未执行。',
+                      enabled=cfg.notify_task_failed)
+            self.set_next_run(task=TASK_NAME, success=False, finish=True)
+            raise TaskEnd(TASK_NAME)
+
         if cfg.click_delay_max < cfg.click_delay_min:
             logger.warning(f'点击随机等待下限 {cfg.click_delay_min} 秒大于上限 '
                            f'{cfg.click_delay_max} 秒，运行时按对调后的区间处理')
 
-        # 执行任务前切换御魂预设（协战模式打斗需要；邀请模式可保持关闭）
-        self.switch_soul_before_run(conf.switch_soul_config)
+        # 只有协战模式需要打斗，才切换御魂；邀请模式全程不战斗，不做多余动作，
+        # 只确保停在庭院（活动入口从这里找）
+        if mode == ChaoGuiWangAssistMode.ASSIST:
+            self.switch_soul_before_run(conf.switch_soul_config)
+        else:
+            self.goto_page(page_main)
 
         if not self.enter_cgw():
             self.push('超鬼王协战·任务完全失败',
@@ -645,6 +747,7 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
             'COMPLETE': ('超鬼王协战·任务完成', cfg.notify_task_complete),
             'STAR_CLEARED': ('超鬼王协战·打完所选星级鬼王', cfg.notify_star_cleared),
             'NO_ASSIST': ('超鬼王协战·无协战鬼王', cfg.notify_no_assist),
+            'FRIEND_MISSING': ('超鬼王协战·未找到指定好友', cfg.notify_friend_missing),
             'DEFEAT_LIMIT': ('超鬼王协战·连续协战失败', cfg.notify_defeat_limit),
             'FAILED': ('超鬼王协战·任务完全失败', cfg.notify_task_failed),
             'END': ('超鬼王协战·任务汇总', cfg.notify_summary),

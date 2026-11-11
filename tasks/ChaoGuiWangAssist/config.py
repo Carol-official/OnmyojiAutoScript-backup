@@ -36,8 +36,9 @@ class ChaoGuiWangAssistConfig(ConfigBase):
     star_rank_6: bool = Field(default=False,
                               description='召唤并分享 6 星鬼王（邀请模式生效）')
     share_friend_name: str = Field(default='',
-                                   description='分享目标好友名，须与分享弹窗中的名字完全一致；'
-                                               '留空则每次选列表里的第一个好友')
+                                   description='分享目标好友名，须与分享弹窗中的名字完全一致。'
+                                               '邀请模式只邀请这一位好友，不会改邀请列表里的其他人；'
+                                               '留空时任务直接结束，不做兜底选择')
 
     # ---------------- 等待节奏 ----------------
     # 邀请模式：分享后等好友击杀；协战模式：等好友发现新鬼王。两者共用以下两个参数。
@@ -78,6 +79,9 @@ class ChaoGuiWangAssistConfig(ConfigBase):
                                    description='协战模式等待超时仍无可用鬼王时是否推送')
     notify_invite_timeout: bool = Field(default=True,
                                         description='邀请模式分享后长时间未等到好友击杀时是否推送')
+    notify_friend_missing: bool = Field(default=True,
+                                        description='邀请模式在分享弹窗里找不到指定好友、'
+                                                    '为不误邀请其他人而结束任务时是否推送')
     notify_defeat_limit: bool = Field(default=True,
                                       description='连续协战失败达到上限、任务停止时是否推送')
     notify_summary: bool = Field(default=True,

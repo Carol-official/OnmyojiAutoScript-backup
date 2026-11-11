@@ -1664,6 +1664,7 @@
       "notify_star_cleared": true,
       "notify_no_assist": true,
       "notify_invite_timeout": true,
+      "notify_friend_missing": true,
       "notify_defeat_limit": true,
       "notify_summary": true
     }
