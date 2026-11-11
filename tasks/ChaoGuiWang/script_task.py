@@ -68,7 +68,7 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
 
         enabled 由调用方传入对应场景的配置项，例如 cfg.notify_round_timeout；
         总开关 notify_enable 在这里统一读取，关掉后所有推送都不再发送。
-        返回是否真的调用了推送，供主流程判断要不要补发结束通知。
+        返回是否真的调用了推送，便于调用方记录；不影响任务流程。
 
         notify_config 形如：
             provider: pushplus
@@ -577,18 +577,21 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
             # 步骤 4：疲劳度判定（严格「超过」阈值才停止）
             fatigue = self.get_fatigue()
             if fatigue is None:
-                final_pushed = self.push('超鬼王·疲劳度识别失败',
-                                         '右上角疲劳度连续识别失败，为避免超疲劳，'
-                                         f'任务停止。已击杀 {killed} 只。',
-                                         enabled=cfg.notify_fatigue_ocr_failed)
+                self.push('超鬼王·疲劳度识别失败',
+                          '右上角疲劳度连续识别失败，为避免超疲劳，'
+                          f'任务停止。已击杀 {killed} 只。',
+                          enabled=cfg.notify_fatigue_ocr_failed)
+                # 该场景已有专属通知，无论开关是否开启都不再补发通用的结束通知
+                final_pushed = True
                 stop_reason = '疲劳度识别失败'
                 break
             logger.info(f'当前疲劳度 {fatigue}/100，阈值 {cfg.fatigue_limit}')
             if fatigue > cfg.fatigue_limit:
-                final_pushed = self.push('超鬼王·疲劳度已达上限',
-                                         f'当前疲劳度 {fatigue}/100，超过设定阈值 {cfg.fatigue_limit}，'
-                                         f'任务停止。已击杀 {killed}/{cfg.kill_count} 只。',
-                                         enabled=cfg.notify_fatigue_limit)
+                self.push('超鬼王·疲劳度已达上限',
+                          f'当前疲劳度 {fatigue}/100，超过设定阈值 {cfg.fatigue_limit}，'
+                          f'任务停止。已击杀 {killed}/{cfg.kill_count} 只。',
+                          enabled=cfg.notify_fatigue_limit)
+                final_pushed = True
                 stop_reason = '疲劳度超过阈值'
                 break
 
