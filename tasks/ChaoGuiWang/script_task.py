@@ -50,14 +50,12 @@ PREPARE_STABLE_FRAMES = 2       # 准备按钮连续出现多少帧才认为准�
 PREPARE_FRAME_INTERVAL = 0.6    # 稳定检查的截图间隔
 PREPARE_AFTER_CHALLENGE = 2.0   # 点完「挑战」后留给游戏加载准备界面的时间
 PREPARE_AFTER_CLICK = 1.5       # 每次点完「准备」后等待游戏响应的时间
-PREPARE_CONFIRM_TIMEOUT = 45    # 确认「已进入战斗」的总超时
+PREPARE_CONFIRM_TIMEOUT = 45    # 确认「准备」点击生效的总超时
 PREPARE_RETRY_INTERVAL = 2.5    # 两次补点之间的最小间隔
-PREPARE_FIRST_GRACE = 15.0      # 首次点「准备」后的宽限：2026-11-13 实机日志显示
-                                # 点「准备」→ 真正开战约 11.5 秒（点击→补点 10 秒、
-                                # 补点→开战 1.5 秒），旧的 8 秒会把加载期误判成
-                                # 「点击没生效」，每只鬼王都补点一次并打 WARNING。
-                                # 与补点间隔解耦：正常加载期内完全不补点，
-                                # 真被吞时 15 秒后才开始按短间隔恢复
+# 点完「准备」后不立刻下结论，先观察按钮是否消失；窗口内消失即成功。
+# 单纯一帧截图容易被界面切换动画骗到，所以再要求连续几帧都看不到高亮按钮
+PREPARE_OBSERVE_WINDOW = 3.0    # 每次点击后的观察窗口（秒）
+PREPARE_GONE_FRAMES = 2         # 连续多少帧判定「准备按钮已消失」
 PREPARE_RETRY_LIMIT = 6         # 最多补点次数
 
 # 点击「召唤鬼王」「挑战」按钮之前的随机等待区间（秒）。
@@ -479,25 +477,25 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
             sleep(PREPARE_FRAME_INTERVAL if stable > 1 else 0.3)
 
     def confirm_battle_started(self) -> bool:
-        """步骤 8 的闭环：确认「准备」点击真的生效，没生效就间隔补点。
+        """步骤 8 的闭环：点完「准备」看按钮是否消失，没消失就 WARNING 重新点。
 
-        旧逻辑点一次「准备」就直接进入等结算循环，若点击被界面切换动画吞掉，
-        就会一直停在准备界面，直到 200 秒战斗超时。这里用三种证据确认开战：
-          1. 出现战斗信息图标 I_BATTLE_INFO（准备界面实测不匹配）；
-          2. 出现胜利/失败结算画面（战斗可能很快结束）；
-          3. 准备按钮连续 3 帧不再出现。
-        首次点击单独给 PREPARE_FIRST_GRACE 秒宽限：点「准备」后游戏还要加载
-        十来秒才真正开战，这段时间高亮准备按钮一直可见，不代表点击被吞。
-        宽限期内只等不点，之后仍在准备界面才按 PREPARE_RETRY_INTERVAL 间隔补点，
-        最多 PREPARE_RETRY_LIMIT 次，补点日志级别保持 WARNING 不变。
+        实机日志（2026-11-13 03:49）显示：点「准备」到真正开战约 18.7 秒，
+        这段时间高亮准备按钮一直可见。旧逻辑等的是 I_BATTLE_INFO（真正开战）
+        才返回，结果固定会在 15 秒宽限结束时补点一次、每只鬼王都打 WARNING。
+        现在只判断「这一下点进去没有」，判据换成准备按钮本身：
+          1. 出现战斗信息 / 结算画面：已经开战，直接成功；
+          2. 高亮准备按钮连续 PREPARE_GONE_FRAMES 帧不再出现，或按钮变成
+             暗态 I_PREPARE_DARK（已准备）：点击已生效，成功；
+          3. 高亮按钮仍在且观察窗口已过：点击被吞，打 WARNING 并重新点一次，
+             最多 PREPARE_RETRY_LIMIT 次。
+        补点日志级别保持 WARNING 不变。
         """
         timer = Timer(PREPARE_CONFIRM_TIMEOUT).start()
-        # 首次宽限用长计时器；一旦真的开始补点，就换回短间隔计时器，
-        # 保证点击真被吞时恢复节奏不被拖慢
-        grace = Timer(PREPARE_FIRST_GRACE).start()
         retries = 0
         gone = 0
-        loading_logged = False
+        # 首次点击已在 click_stage 里完成，先留一小段窗口让游戏响应，
+        # 避免刚点完按钮还没来得及消失就误报
+        observe = Timer(PREPARE_OBSERVE_WINDOW).start()
         while 1:
             self.screenshot()
             if (self.appear(self.I_BATTLE_INFO)
@@ -506,37 +504,31 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
                     or self.appear(self.I_WIN)):
                 logger.info('已确认进入战斗')
                 return True
-            if self.appear(self.I_PREPARE_HIGHLIGHT):
-                # 高亮准备按钮仍在时优先按「游戏正在加载」处理，而不是「点击被吞」。
-                # 宽限期内一次都不补点，正常加载就不会再打出那条 WARNING；
-                # 只有宽限期结束仍停在准备界面，才开始按短间隔补点恢复
+            # 超时判定放在所有 continue 之前，避免奖励弹窗一直弹出时跳过超时
+            if timer.reached():
+                logger.warning(f'确认「准备」生效超时（{PREPARE_CONFIRM_TIMEOUT} 秒，'
+                               f'重新点击 {retries} 次）')
+                return False
+            if self.ui_reward_appear_click():
+                continue
+            if (self.appear(self.I_PREPARE_DARK)
+                    or not self.appear(self.I_PREPARE_HIGHLIGHT)):
+                # 按钮变暗（已准备）或已消失，都说明这一下点进去了
+                gone += 1
+                if gone >= PREPARE_GONE_FRAMES:
+                    logger.info('准备按钮已消失，「准备」点击成功')
+                    return True
+            else:
                 gone = 0
-                if not grace.reached():
-                    if not loading_logged:
-                        logger.info(f'准备界面加载中，{PREPARE_FIRST_GRACE:.0f} 秒宽限期内不补点')
-                        loading_logged = True
-                elif retries < PREPARE_RETRY_LIMIT:
+                if observe.reached() and retries < PREPARE_RETRY_LIMIT:
                     if self.click(self.C_CGW_PREPARE_CLICK, interval=PREPARE_RETRY_INTERVAL):
                         retries += 1
                         # 连续补点同一按钮会触发框架的防卡死保护，清掉点击记录
                         self.device.click_record_clear()
-                        logger.warning(f'准备界面未响应，第 {retries}/{PREPARE_RETRY_LIMIT} 次补点「准备」')
-                        grace = Timer(PREPARE_RETRY_INTERVAL).start()
+                        logger.warning(f'准备按钮未消失，第 {retries}/{PREPARE_RETRY_LIMIT} 次重新点击「准备」')
+                        observe = Timer(PREPARE_OBSERVE_WINDOW).start()
                         sleep(PREPARE_AFTER_CLICK)
                         continue
-            elif self.appear(self.I_PREPARE_DARK):
-                # 按钮变暗通常表示已准备、正在等待开战，只等不点
-                gone = 0
-            else:
-                gone += 1
-                if gone >= 3:
-                    logger.info('准备按钮已消失，战斗开始')
-                    return True
-            if self.ui_reward_appear_click():
-                continue
-            if timer.reached():
-                logger.warning(f'确认进入战斗超时（{PREPARE_CONFIRM_TIMEOUT} 秒，补点 {retries} 次）')
-                return False
             sleep(0.5)
 
     def wait_settle(self, cfg) -> str:
@@ -617,10 +609,14 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
                                 pre_delay=BEFORE_CLICK_DELAY):
             self.last_timeout_stage = '挑战鬼王'
             return 'TIMEOUT'
-        # 步骤 8：准备按钮连续两帧稳定后再点，并改用按钮中心的固定点击区域
+        # 步骤 8：准备按钮连续两帧稳定后，先随机等 1.5~3 秒再点。
+        # 准备界面刚从「挑战」切过来时按钮虽已画出但还不可点，点太早会被吞；
+        # 召唤/挑战早就有这段等待，准备按钮是唯一漏掉的。
+        # 点完由 confirm_battle_started 检查按钮是否消失来确认点击生效
         if not self.click_stage(self.I_PREPARE_HIGHLIGHT, self.C_CGW_PREPARE_CLICK,
                                 timeout=30, stable=PREPARE_STABLE_FRAMES,
-                                delay=PREPARE_AFTER_CLICK):
+                                delay=PREPARE_AFTER_CLICK,
+                                pre_delay=BEFORE_CLICK_DELAY):
             self.last_timeout_stage = '点击准备'
             return 'TIMEOUT'
         if not self.confirm_battle_started():
