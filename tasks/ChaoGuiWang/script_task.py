@@ -52,10 +52,10 @@ PREPARE_AFTER_CHALLENGE = 2.0   # 点完「挑战」后留给游戏加载准备�
 PREPARE_AFTER_CLICK = 1.5       # 每次点完「准备」后等待游戏响应的时间
 PREPARE_CONFIRM_TIMEOUT = 45    # 确认「准备」点击生效的总超时
 PREPARE_RETRY_INTERVAL = 2.5    # 两次补点之间的最小间隔
-# 点完「准备」后不立刻下结论，先观察按钮是否消失；窗口内消失即成功。
-# 单纯一帧截图容易被界面切换动画骗到，所以再要求连续几帧都看不到高亮按钮
-PREPARE_OBSERVE_WINDOW = 3.0    # 每次点击后的观察窗口（秒）
-PREPARE_GONE_FRAMES = 2         # 连续多少帧判定「准备按钮已消失」
+# 点完「准备」后留一段观察窗口再决定要不要补点。
+# 注意：「按钮消失」不能当作点击成功 —— 点击时按钮有按下/变色动画，
+# 高亮模板会短暂不匹配，实机 04:12 就是因此被误判成开战、最后等到挑战失败
+PREPARE_OBSERVE_WINDOW = 3.0    # 每次点击后的补点观察窗口（秒）
 PREPARE_RETRY_LIMIT = 6         # 最多补点次数
 
 # 点击「召唤鬼王」「挑战」按钮之前的随机等待区间（秒）。
@@ -477,24 +477,23 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
             sleep(PREPARE_FRAME_INTERVAL if stable > 1 else 0.3)
 
     def confirm_battle_started(self) -> bool:
-        """步骤 8 的闭环：点完「准备」看按钮是否消失，没消失就 WARNING 重新点。
+        """步骤 8 的闭环：确认「准备」点击真的生效，没生效就 WARNING 重新点。
 
-        实机日志（2026-11-13 03:49）显示：点「准备」到真正开战约 18.7 秒，
-        这段时间高亮准备按钮一直可见。旧逻辑等的是 I_BATTLE_INFO（真正开战）
-        才返回，结果固定会在 15 秒宽限结束时补点一次、每只鬼王都打 WARNING。
-        现在只判断「这一下点进去没有」，判据换成准备按钮本身：
-          1. 出现战斗信息 / 结算画面：已经开战，直接成功；
-          2. 高亮准备按钮连续 PREPARE_GONE_FRAMES 帧不再出现，或按钮变成
-             暗态 I_PREPARE_DARK（已准备）：点击已生效，成功；
-          3. 高亮按钮仍在且观察窗口已过：点击被吞，打 WARNING 并重新点一次，
-             最多 PREPARE_RETRY_LIMIT 次。
+        实机 2026-11-13 04:11:56 一轮证明「准备按钮消失」不能当作点击成功：
+        点下去按钮会有按下/变色动画，I_PREPARE_HIGHLIGHT 会短暂不匹配，
+        旧版据此返回成功，实际还停在准备界面，最后等来的却是
+        「挑战失败（未在限定时间内击杀）」。
+        因此成功只认真正的开战证据，准备按钮只用来决定「要不要补点」：
+          1. 出现战斗信息 / 结算画面 → 已开战，成功；
+          2. 高亮准备按钮仍在且观察窗口已过 → 点击被吞，WARNING 并重新点，
+             最多 PREPARE_RETRY_LIMIT 次；
+          3. 按钮变暗或短暂消失 → 只等开战证据，既不补点也不判成功；
+             按钮恢复高亮后按 2 处理。
         补点日志级别保持 WARNING 不变。
         """
         timer = Timer(PREPARE_CONFIRM_TIMEOUT).start()
         retries = 0
-        gone = 0
-        # 首次点击已在 click_stage 里完成，先留一小段窗口让游戏响应，
-        # 避免刚点完按钮还没来得及消失就误报
+        # 首次点击已在 click_stage 里完成，先留一小段窗口让游戏响应
         observe = Timer(PREPARE_OBSERVE_WINDOW).start()
         while 1:
             self.screenshot()
@@ -511,21 +510,15 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
                 return False
             if self.ui_reward_appear_click():
                 continue
-            if (self.appear(self.I_PREPARE_DARK)
-                    or not self.appear(self.I_PREPARE_HIGHLIGHT)):
-                # 按钮变暗（已准备）或已消失，都说明这一下点进去了
-                gone += 1
-                if gone >= PREPARE_GONE_FRAMES:
-                    logger.info('准备按钮已消失，「准备」点击成功')
-                    return True
-            else:
-                gone = 0
+            if self.appear(self.I_PREPARE_HIGHLIGHT):
+                # 高亮按钮还在 = 点击没生效，观察窗口过后补点；
+                # 按钮变暗或短暂消失时不走这里，避免把点击动画误判成开战
                 if observe.reached() and retries < PREPARE_RETRY_LIMIT:
                     if self.click(self.C_CGW_PREPARE_CLICK, interval=PREPARE_RETRY_INTERVAL):
                         retries += 1
                         # 连续补点同一按钮会触发框架的防卡死保护，清掉点击记录
                         self.device.click_record_clear()
-                        logger.warning(f'准备按钮未消失，第 {retries}/{PREPARE_RETRY_LIMIT} 次重新点击「准备」')
+                        logger.warning(f'准备按钮仍在，第 {retries}/{PREPARE_RETRY_LIMIT} 次重新点击「准备」')
                         observe = Timer(PREPARE_OBSERVE_WINDOW).start()
                         sleep(PREPARE_AFTER_CLICK)
                         continue
