@@ -51,7 +51,9 @@ PREPARE_FRAME_INTERVAL = 0.6    # 稳定检查的截图间隔
 PREPARE_AFTER_CHALLENGE = 2.0   # 点完「挑战」后留给游戏加载准备界面的时间
 PREPARE_AFTER_CLICK = 1.5       # 每次点完「准备」后等待游戏响应的时间
 PREPARE_CONFIRM_TIMEOUT = 45    # 确认「已进入战斗」的总超时
-PREPARE_RETRY_INTERVAL = 2.5    # 两次补点之间的最小间隔，也作为首次点击的宽限期
+PREPARE_RETRY_INTERVAL = 2.5    # 两次补点之间的最小间隔
+PREPARE_FIRST_GRACE = 8.0       # 首次点「准备」后的宽限：游戏要加载约 6 秒才真正开战，
+                                # 与补点间隔解耦，避免把正常加载误判成「点击没生效」
 PREPARE_RETRY_LIMIT = 6         # 最多补点次数
 
 # 点击「召唤鬼王」「挑战」按钮之前的随机等待区间（秒）。
@@ -78,9 +80,9 @@ STAR_ROW_ROI = (1058, 526, 58, 17)
 STAR_PILL_PITCH = 8.0
 STAR_PILL_SPAN_OFFSET = 2.0
 STAR_COLUMN_MIN = 3            # 一列至少有这么多橙色像素才算勾玉本体，过滤光晕
-# 面积只做交叉校验：实测 1~6 星约 33/55/82/108/137/162 像素，每星约 26 个。
-# 光晕脉冲会让面积整体抬高（曾把 4 星算成 5 星），所以不能作为主判据。
-STAR_ORANGE_PER_RANK = 26.5
+# 橙色像素下限只用来判断「有没有勾玉」（门票打空 / 界面未加载），不参与星级判定。
+# 原先用面积除以每星像素数做交叉校验，但光晕脉冲会整体抬高面积（实机恒把
+# 3 星读成 4 星），且结果从不参与任何分支，已移除。
 STAR_ORANGE_MIN = 12
 # 圆形图标本体，门票打空时这里会变成金色鬼面具，且下方没有橙色勾玉
 TICKET_ICON_ROI = (1050, 485, 65, 67)
@@ -306,24 +308,24 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
 
         判据用「橙色像素的横向跨度」而不是像素面积：勾玉按 8px 固定间距排布，
         跨度只取决于点亮了几颗，和光晕强弱无关；面积会被图标弹出时的辉光
-        整体抬高（实机曾把 4 星读成 5 星）。面积只用来交叉校验并写日志。
+        整体抬高（实机曾把 4 星读成 5 星），因此完全不参与判定。
+        本帧的跨度与像素量记入 _star_diag，只在识别异常时用于诊断日志。
         """
         hsv = self._hsv(STAR_ROW_ROI)
         orange = ((hsv[..., 0] >= 5) & (hsv[..., 0] <= 28) &
                   (hsv[..., 1] >= 120) & (hsv[..., 2] >= 150))
         pixels = int(orange.sum())
         if pixels < STAR_ORANGE_MIN:
+            self._star_diag = f'橙色 {pixels}px（低于下限 {STAR_ORANGE_MIN}）'
             return 0
         columns = [i for i, count in enumerate(orange.sum(axis=0))
                    if count >= STAR_COLUMN_MIN]
         if not columns:
+            self._star_diag = f'橙色 {pixels}px，但无有效列'
             return 0
         span = columns[-1] - columns[0] + 1
         rank = int(round((span + STAR_PILL_SPAN_OFFSET) / STAR_PILL_PITCH))
-        area_rank = int(round(pixels / STAR_ORANGE_PER_RANK))
-        if area_rank != rank:
-            logger.info(f'星级跨度法判定 {rank} 星（跨度 {span}px），'
-                        f'面积法给出 {area_rank} 星（橙色 {pixels}px），以跨度法为准')
+        self._star_diag = f'跨度 {span}px，橙色 {pixels}px'
         return max(1, min(6, rank))
 
     def is_ticket_empty(self) -> bool:
@@ -340,16 +342,24 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
         return False
 
     def read_star_with_retry(self, times: int = 3) -> int:
-        """星级图标偶尔会被界面动画遮住，连续识别到同一个结果才采信。"""
-        last = None
+        """星级图标偶尔会被界面动画遮住，连续识别到同一个结果才采信。
+
+        正常情况不输出诊断信息；只有三次读数不一致、或最终仍识别不到星级时，
+        才打一行包含每帧跨度 / 橙色像素量的记录，便于事后排障。
+        """
+        reads = []
         for _ in range(times):
             self.screenshot()
             star = self.read_demon_star()
-            if star and star == last:
+            reads.append((star, getattr(self, '_star_diag', '')))
+            if len(reads) >= 2 and star and star == reads[-2][0]:
                 return star
-            last = star
             sleep(1)
-        return last or 0
+        result = reads[-1][0] or 0
+        if not result or len({star for star, _ in reads}) > 1:
+            detail = ' | '.join(f'{star}星（{diag}）' for star, diag in reads)
+            logger.warning(f'星级识别异常：{detail}，本轮采用 {result} 星')
+        return result
 
     # 星级 → 配置字段名。协战任务继承本类，但它的星级开关叫 invite_star_N，会覆盖这张表。
     STAR_FLAG_FIELDS = {
@@ -472,10 +482,14 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
           1. 出现战斗信息图标 I_BATTLE_INFO（准备界面实测不匹配）；
           2. 出现胜利/失败结算画面（战斗可能很快结束）；
           3. 准备按钮连续 3 帧不再出现。
-        仍在准备界面时按固定间隔补点，最多 PREPARE_RETRY_LIMIT 次。
+        首次点击单独给 PREPARE_FIRST_GRACE 秒宽限（游戏加载约 6 秒），
+        之后仍在准备界面才按 PREPARE_RETRY_INTERVAL 间隔补点，
+        最多 PREPARE_RETRY_LIMIT 次，补点日志级别保持 WARNING 不变。
         """
         timer = Timer(PREPARE_CONFIRM_TIMEOUT).start()
-        grace = Timer(PREPARE_RETRY_INTERVAL).start()
+        # 首次宽限用长计时器；一旦真的开始补点，就换回短间隔计时器，
+        # 保证点击真被吞时恢复节奏不被拖慢
+        grace = Timer(PREPARE_FIRST_GRACE).start()
         retries = 0
         gone = 0
         while 1:
@@ -495,7 +509,7 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
                         # 连续补点同一按钮会触发框架的防卡死保护，清掉点击记录
                         self.device.click_record_clear()
                         logger.warning(f'准备界面未响应，第 {retries}/{PREPARE_RETRY_LIMIT} 次补点「准备」')
-                        grace.reset()
+                        grace = Timer(PREPARE_RETRY_INTERVAL).start()
                         sleep(PREPARE_AFTER_CLICK)
                         continue
             elif self.appear(self.I_PREPARE_DARK):
