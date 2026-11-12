@@ -29,8 +29,10 @@ class ChaoGuiWangAssistAssets:
 	I_CGWA_GATHER_SELF = RuleImage(roi_front=(245,133,62,62), roi_back=(195,125,160,130), threshold=0.75, method="Template matching", file="./tasks/ChaoGuiWangAssist/cgwa/cgwa_gather_self.png")
 	# 「自己发现」鬼王卡片上的「剩余时间」四个字（静态文字，不含会变化的倒计时数字）；搜索区只覆盖上半部分，用于判定进入界面时已经有一只召唤好的鬼王，此时不得再点召唤 
 	I_CGWA_SELF_CARD = RuleImage(roi_front=(142,142,96,28), roi_back=(120,135,240,110), threshold=0.8, method="Template matching", file="./tasks/ChaoGuiWangAssist/cgwa/cgwa_self_card.png")
-	# 「好友发现」鬼王卡片右上角的「已公开」印章，命中表示该鬼王已公开、按需求忽略不打 
+	# 「好友发现」鬼王卡片右上角的「已公开」印章（原始亮色版本），命中表示该鬼王已公开、按需求忽略不打 
 	I_CGWA_PUBLIC = RuleImage(roi_front=(237,384,77,73), roi_back=(195,350,160,140), threshold=0.75, method="Template matching", file="./tasks/ChaoGuiWangAssist/cgwa/cgwa_public.png")
+	# 「已公开」印章的实机版本：只取印章核心图案，不含背景与倒计时；实机截图上旧模板仅 0.64 分漏检，两个模板任一命中即判已公开 
+	I_CGWA_PUBLIC_REAL = RuleImage(roi_front=(245,395,62,58), roi_back=(195,350,160,140), threshold=0.75, method="Template matching", file="./tasks/ChaoGuiWangAssist/cgwa/cgwa_public_real.png")
 	# 「好友发现」鬼王卡片上的「剩余时间」标签，用于判定该区域确实存在一张鬼王卡片（卡片没有集结印章，只有已公开印章或什么都没有）；搜索区只覆盖下半部分，避免命中自己发现卡片的同一标签 
 	I_CGWA_FRIEND_CARD = RuleImage(roi_front=(143,402,90,30), roi_back=(120,350,240,180), threshold=0.8, method="Template matching", file="./tasks/ChaoGuiWangAssist/cgwa/cgwa_friend_card.png")
 	# 「好友发现」区域的鬼面空位图标（截图「暂无好友发现鬼王」），出现即表示当前没有可协战的好友鬼王；搜索区只覆盖下半部分，避免命中「自己发现」的同款鬼面 

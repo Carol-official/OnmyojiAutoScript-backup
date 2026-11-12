@@ -24,7 +24,16 @@
     "roiBack": "195,350,160,140",
     "method": "Template matching",
     "threshold": 0.75,
-    "description": "「好友发现」鬼王卡片右上角的「已公开」印章，命中表示该鬼王已公开、按需求忽略不打"
+    "description": "「好友发现」鬼王卡片右上角的「已公开」印章（原始亮色版本），命中表示该鬼王已公开、按需求忽略不打"
+  },
+  {
+    "itemName": "cgwa_public_real",
+    "imageName": "cgwa_public_real.png",
+    "roiFront": "245,395,62,58",
+    "roiBack": "195,350,160,140",
+    "method": "Template matching",
+    "threshold": 0.75,
+    "description": "「已公开」印章的实机版本：从 1280x720 实机全屏截图裁出的印章核心图案，不含背景与跳动倒计时；实机上旧模板仅 0.64 分（阈值 0.75）会漏检，两个模板任一命中即判为已公开、不打"
   },
   {
     "itemName": "cgwa_friend_card",

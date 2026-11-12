@@ -29,10 +29,14 @@
     4. 只看「好友发现」区域：
        - 鬼面空位图标存在 → 没有可协战鬼王，每 wait_interval 秒重查，
          超过 wait_timeout 仍存在则推送「无协战鬼王」并结束
-       - 鬼王卡片带「已公开」印章 → 按需求忽略，继续等待
+       - 鬼王卡片带「已公开」印章 → 按需求忽略，继续等待。印章有两个模板
+         （原始亮色版 + 实机截图重裁版），任一命中即判已公开；
+         实机上旧模板只有 0.64 分（阈值 0.75）会漏检，必须靠实机模板兜底
        - 存在鬼王卡片且没有「已公开」印章 → 非公开鬼王：先点这张卡片把自己
          的选中目标切到好友的鬼王，再点挑战 → 准备 → 结算，
          出现一次胜利结算即协战成功一只
+       - 每轮把「卡片 / 已公开印章×2 / 空位鬼面」四个模板分数与最终结论写进日志，
+         公开判断不再静默；三种特征都读不到时先按 1 秒间隔重试 3 轮才做界面诊断
 
 推送：只保留任务完成、任务完全失败、打完所选星级、无协战鬼王、邀请超时、
 未找到指定好友、连续协战失败、任务结束汇总八类，各有独立开关，
@@ -68,6 +72,11 @@ CHALLENGE_APPEAR_TIMEOUT = 20
 GATHER_APPEAR_TIMEOUT = 10
 # 等待超时后允许的连续无进展次数，超过后做一次界面诊断
 WAIT_ROUND_BEFORE_DIAGNOSE = 3
+# 「好友发现」三个特征都没读到时，连续多少轮才真正做界面诊断。
+# 战斗结算后界面会有几秒过渡动画，此时截图上三个模板都读不到，
+# 旧逻辑每轮都诊断，会在日志里刷出十几次「卡住超时」误报。
+UNKNOWN_GRACE_ROUNDS = 3
+UNKNOWN_RETRY_INTERVAL = 1.0
 # 分享弹窗没有关闭按钮，只能点弹窗外的空白处让它收起。
 # 候选点都放在左侧「好友发现」的空白区域（鬼面空位、「暂无好友发现鬼王」文字），
 # 刻意避开右下角「挑战」按钮 —— 那里点了会直接开打，属于邀请模式绝不允许的动作。
@@ -612,23 +621,57 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
     # 协战模式
     # ------------------------------------------------------------------
     def friend_demon_state(self) -> str:
-        """「好友发现」区域的状态。
+        """「好友发现」区域的状态，并把四个模板的分数与最终结论写进日志。
 
-        'MASK'    鬼面空位图标 → 当前没有可协战的好友鬼王；
-        'PUBLIC'  鬼王卡片带「已公开」印章 → 按需求忽略；
-        'PRIVATE' 存在鬼王卡片且没有「已公开」印章 → 非公开鬼王，可以协战；
-        'UNKNOWN' 三种特征都没有 → 界面异常，交给诊断恢复。
+        'MASK'    只有鬼面空位图标 → 当前没有可协战的好友鬼王；
+        'PUBLIC'  「已公开」印章命中（两个模板任一命中）→ 按需求忽略；
+        'PRIVATE' 鬼王卡片存在且「已公开」印章未命中 → 非公开鬼王，可以协战；
+        'UNKNOWN' 三种特征都没有 → 界面过渡或异常，交给诊断恢复。
 
-        注意「好友发现」的卡片上没有「集结」印章（那是「自己发现」卡片才有的），
+        判定顺序是「已公开印章 → 卡片 → 空位鬼面」：
+        1. 印章优先于空位，避免某帧卡片与空位同时可见时跳过公开检查；
+        2. 卡片标签没读到但印章在，仍保守判 PUBLIC，绝不会把已公开鬼王打掉；
+        3. 每轮都打印四个模板的匹配分数，判定为「非公开」时也有据可查
+           （旧实现只在命中 PUBLIC 时打日志，PRIVATE 是静默的，无法确认
+           公开判断到底有没有执行、印章有没有漏检）。
+
+        「好友发现」的卡片上没有「集结」印章（那是「自己发现」卡片才有的），
         所以卡片存在与否用卡片固定的「剩余时间」标签判定。
         """
-        if self.appear(self.I_CGWA_FRIEND_MASK):
-            return 'MASK'
-        if self.appear(self.I_CGWA_PUBLIC):
-            return 'PUBLIC'
-        if self.appear(self.I_CGWA_FRIEND_CARD):
-            return 'PRIVATE'
-        return 'UNKNOWN'
+        card = self.appear(self.I_CGWA_FRIEND_CARD)
+        card_score = self.I_CGWA_FRIEND_CARD.last_score
+        public_old = self.appear(self.I_CGWA_PUBLIC)
+        public_old_score = self.I_CGWA_PUBLIC.last_score
+        public_real = self.appear(self.I_CGWA_PUBLIC_REAL)
+        public_real_score = self.I_CGWA_PUBLIC_REAL.last_score
+        mask = self.appear(self.I_CGWA_FRIEND_MASK)
+        mask_score = self.I_CGWA_FRIEND_MASK.last_score
+        public = public_old or public_real
+
+        if public:
+            state = 'PUBLIC'
+            reason = '已公开印章命中，按需求忽略不打'
+        elif card:
+            state = 'PRIVATE'
+            reason = '卡片存在、已公开印章未命中，判为非公开并协战'
+        elif mask:
+            state = 'MASK'
+            reason = '只有空位鬼面，好友发现为空'
+        else:
+            state = 'UNKNOWN'
+            reason = '三种特征均未命中，界面过渡或异常'
+
+        def mark(hit: bool) -> str:
+            return '√' if hit else '×'
+
+        logger.info(
+            f'好友发现区判定：卡片 {card_score:.3f}{mark(card)} | '
+            f'已公开印章[旧 {public_old_score:.3f}{mark(public_old)} '
+            f'实机 {public_real_score:.3f}{mark(public_real)}] | '
+            f'空位鬼面 {mask_score:.3f}{mark(mask)} '
+            f'→ {state}（{reason}）'
+        )
+        return state
 
     def assist_once(self, cfg) -> str:
         """点好友鬼王卡片 → 挑战 → 准备 → 结算，返回 'WIN' / 'LOSE' / 'GONE' / 'TIMEOUT'。
@@ -665,6 +708,7 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
         defeats = 0
         timeouts = 0
         wait_timer = None
+        unknown_streak = 0
         while 1:
             self.keep_alive()
             # 等待好友发现鬼王时每轮都要重新截帧，否则一直拿旧画面判断，
@@ -674,6 +718,7 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
             state = self.friend_demon_state()
 
             if state in ('MASK', 'PUBLIC'):
+                unknown_streak = 0
                 if state == 'MASK':
                     logger.info('「好友发现」为空（鬼面可见），等待好友发现鬼王')
                 else:
@@ -691,6 +736,7 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
                 continue
 
             if state == 'PRIVATE':
+                unknown_streak = 0
                 wait_timer = None
                 result = self.assist_once(cfg)
                 if result == 'WIN':
@@ -724,11 +770,22 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
                                      f'共成功协战 {assists} 只'), 'FAILED'
                 continue
 
-            # UNKNOWN：界面异常，交给诊断恢复
-            logger.warning('「好友发现」区域三种特征都未命中，先做界面诊断恢复')
+            # UNKNOWN：战斗结算后的界面过渡会让三个模板短暂同时读不到，
+            # 先按 1 秒间隔重试几轮，连续 UNKNOWN_GRACE_ROUNDS 轮才做诊断，
+            # 避免日志里刷出一长串「卡住超时」的误报
+            unknown_streak += 1
+            if unknown_streak < UNKNOWN_GRACE_ROUNDS:
+                logger.info(f'好友发现区暂未识别（第 {unknown_streak}/{UNKNOWN_GRACE_ROUNDS} 轮），'
+                            f'{UNKNOWN_RETRY_INTERVAL} 秒后重新截图检查')
+                sleep(UNKNOWN_RETRY_INTERVAL)
+                continue
+            unknown_streak = 0
+            logger.warning(f'「好友发现」区域连续 {UNKNOWN_GRACE_ROUNDS} 轮三种特征都未命中，'
+                           f'做界面诊断恢复')
             if not self.diagnose_and_recover('协战主界面'):
                 return assists, (f'界面无法识别且恢复失败，任务提前结束，'
                                  f'共成功协战 {assists} 只'), 'FAILED'
+            sleep(UNKNOWN_RETRY_INTERVAL)
             wait_timer = None
 
     # ------------------------------------------------------------------
