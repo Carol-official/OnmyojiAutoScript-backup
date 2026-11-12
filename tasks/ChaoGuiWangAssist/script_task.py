@@ -64,6 +64,8 @@ SELF_DEMON_INTERVAL = 3
 SHARE_POPUP_TIMEOUT = 20
 # 点卡片后等「挑战」按钮出现的时间（秒）
 CHALLENGE_APPEAR_TIMEOUT = 20
+# 召唤后等「集结」印章出现的时间（秒）；印章是静态图案，10 秒足够
+GATHER_APPEAR_TIMEOUT = 10
 # 等待超时后允许的连续无进展次数，超过后做一次界面诊断
 WAIT_ROUND_BEFORE_DIAGNOSE = 3
 # 分享弹窗没有关闭按钮，只能点弹窗外的空白处让它收起。
@@ -221,10 +223,30 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
     # ------------------------------------------------------------------
     # 通用等待
     # ------------------------------------------------------------------
+    def keep_alive(self) -> None:
+        """长等待期间主动重置设备的卡死计时器。
+
+        设备默认「60 秒内既没有点击、也没有登记过长等待白名单」就抛
+        GameStuckError: Wait too long（实机 2026-11-12 两次报错都是这样结束的）。
+        邀请/协战要按 10 秒间隔等最多 30 分钟，期间完全没有点击动作，
+        所以每个等待循环都要告诉设备「仍在按预期等待」，而不是真卡住了。
+        本任务各等待循环自身都有明确的 Timer 超时，不会因此掩盖真正的死循环。
+        """
+        self.device.stuck_record_clear()
+
+    def self_card_exists(self) -> bool:
+        """「自己发现」是否已经有召唤好的鬼王卡片。
+
+        卡片标签是静态的「剩余时间」四字，集结印章可能被点过而消失，
+        两者任一命中都算卡片在；都不命中才是可召唤状态。
+        """
+        return self.appear(self.I_CGWA_SELF_CARD) or self.appear(self.I_CGWA_GATHER_SELF)
+
     def wait_appear(self, image, timeout: int = 20, interval: float = 0.5) -> bool:
         """等待某个模板出现，期间顺手关掉奖励弹窗。"""
         timer = Timer(timeout).start()
         while 1:
+            self.keep_alive()
             self.screenshot()
             if self.appear(image):
                 return True
@@ -243,7 +265,7 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
         """
         if self.appear(self.I_CGW_DEMON_ICON):
             return True
-        if self.appear(self.I_CGWA_GATHER_SELF):
+        if self.appear(self.I_CGWA_SELF_CARD) or self.appear(self.I_CGWA_GATHER_SELF):
             return True
         if self.appear(self.I_CGW_SUMMON) or self.appear(self.I_CGW_CHALLENGE):
             return True
@@ -304,7 +326,7 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
         """等「自己发现」区域的鬼面图标，返回四种状态。
 
         'READY'    有鬼王可召唤（鬼面图标或「召唤鬼王」按钮可见，且门票没打完）；
-        'EXISTING' 已有自己的鬼王卡片（集结印章可见），跳过召唤直接分享；
+        'EXISTING' 已有自己的鬼王卡片，跳过召唤直接分享；
         'EMPTY'    连续确认门票已打完（图标变金色鬼面、下方没有勾玉）；
         'NONE'     超时且以上都不是。
 
@@ -312,12 +334,25 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
         可能是空的，先判卡片才能识别出「上一只还没分享完」；门票判定放在
         可召唤之前，是因为门票打完后鬼面图标依旧存在（实测 0.998 命中），
         若先判可召唤就会一直停在 READY 上反复点召唤。
+
+        2026-11-12 实机：进入界面时已经有一只召唤好的鬼王，此时右下角是
+        「挑战」而不是「召唤鬼王」，鬼面图标也不在（分数 0.32）。旧版只认
+        集结印章，而印章模板里带了会跳动的倒计时文字，实机只有 0.70 分卡在
+        0.75 阈值下，于是死等 45 秒、诊断、再死等，最后被设备判「Wait too long」。
+        现在用三重视角确认卡片：静态「剩余时间」标签、印章本体、右下角
+        「挑战」按钮；任一命中就是 EXISTING，绝不会再去点召唤。
         """
         timer = Timer(SELF_DEMON_TIMEOUT).start()
         while 1:
+            self.keep_alive()
             self.screenshot()
-            if self.appear(self.I_CGWA_GATHER_SELF):
+            if self.appear(self.I_CGWA_SELF_CARD) or self.appear(self.I_CGWA_GATHER_SELF):
                 logger.info('「自己发现」已有鬼王卡片，本轮跳过召唤，直接分享')
+                return 'EXISTING'
+            if self.appear(self.I_CGW_CHALLENGE):
+                # 右下角是「挑战」说明界面上展示的是已经召唤出来的鬼王，
+                # 可召唤界面这一位置是「召唤鬼王」（实测挑战模板只有 0.38 分）
+                logger.info('右下角已是「挑战」按钮，判定已有鬼王卡片，本轮跳过召唤')
                 return 'EXISTING'
             if self.ticket_empty_confirmed():
                 return 'EMPTY'
@@ -342,13 +377,14 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
         logger.info(f'等待好友击杀，每 {cfg.wait_interval} 秒检查一次，'
                     f'最长等待 {cfg.wait_timeout} 秒')
         while 1:
+            self.keep_alive()
             self.screenshot()
             if self.appear(self.I_CGW_DEMON_ICON):
                 logger.info('「自己发现」鬼面重新出现，判定好友已击杀鬼王')
                 return 'READY'
             # 卡片还在说明好友还没打完；此时圆形图标区域的金色像素不代表门票耗尽，
             # 所以只在没有卡片时才做门票判定，避免误判成任务完成
-            if not self.appear(self.I_CGWA_GATHER_SELF) and self.ticket_empty_confirmed():
+            if not self.self_card_exists() and self.ticket_empty_confirmed():
                 return 'EMPTY'
             if self.ui_reward_appear_click():
                 continue
@@ -370,6 +406,7 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
         timer = Timer(timeout).start()
         gone = 0
         while 1:
+            self.keep_alive()
             self.screenshot()
             if self.appear(self.I_CGWA_SHARE):
                 gone = 0
@@ -457,10 +494,17 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
 
         返回 'OK'             已成功邀请指定好友；
             'FRIEND_MISSING' 弹窗里没有指定好友，不邀请任何人并关掉弹窗；
-            'FAIL'           集结印章没出现 / 弹窗没打开 / 点了邀请但没关掉。
+            'ALREADY'        卡片还在但「集结」印章不在，说明这只鬼王已经集结/邀请过，
+                             不重复邀请，直接去等好友击杀；
+            'FAIL'           既没有卡片也没有印章 / 弹窗没打开 / 点了邀请但没关掉。
         """
-        if not self.wait_appear(self.I_CGWA_GATHER_SELF, timeout=CHALLENGE_APPEAR_TIMEOUT):
-            logger.warning('未等到「集结」印章，无法分享鬼王')
+        if not self.wait_appear(self.I_CGWA_GATHER_SELF, timeout=GATHER_APPEAR_TIMEOUT):
+            self.screenshot()
+            if self.self_card_exists() or self.appear(self.I_CGW_CHALLENGE):
+                logger.warning('「集结」印章不在但鬼王卡片还在，判定这只鬼王已经集结/邀请过，'
+                               '本轮不重复邀请，直接进入等待好友击杀')
+                return 'ALREADY'
+            logger.warning('未等到「集结」印章，也无法确认鬼王卡片，无法分享鬼王')
             return 'FAIL'
         self.click(self.I_CGWA_GATHER_SELF)
         if not self.wait_share_popup():
@@ -484,6 +528,7 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
         invited = 0
         timeouts = 0
         while 1:
+            self.keep_alive()
             logger.hr(f'超鬼王协战·邀请模式，已成功邀请 {invited} 只', 2)
             state = self.wait_self_demon()
 
@@ -528,7 +573,9 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
                 return invited, (f'分享弹窗里没有指定好友「{cfg.share_friend_name}」，'
                                  f'按设置不邀请其他人，任务结束，共成功邀请 {invited} 只'), \
                        'FRIEND_MISSING'
-            if status != 'OK':
+            if status == 'ALREADY':
+                logger.info('这只鬼王此前已集结/邀请过，不重复发送邀请，直接等好友击杀')
+            elif status != 'OK':
                 timeouts += 1
                 logger.warning(f'分享鬼王失败（连续第 {timeouts} 次），做一次界面诊断')
                 if not self.diagnose_and_recover('分享鬼王') \
@@ -619,6 +666,10 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
         timeouts = 0
         wait_timer = None
         while 1:
+            self.keep_alive()
+            # 等待好友发现鬼王时每轮都要重新截帧，否则一直拿旧画面判断，
+            # 好友鬼王出现了也看不见，会白等满 wait_timeout
+            self.screenshot()
             logger.hr(f'超鬼王协战·协战模式，已成功协战 {assists} 只', 2)
             state = self.friend_demon_state()
 

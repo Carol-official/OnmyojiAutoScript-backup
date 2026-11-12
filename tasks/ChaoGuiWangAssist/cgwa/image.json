@@ -2,11 +2,20 @@
   {
     "itemName": "cgwa_gather_self",
     "imageName": "cgwa_gather_self.png",
-    "roiFront": "234,145,77,73",
+    "roiFront": "245,133,62,62",
     "roiBack": "195,125,160,130",
     "method": "Template matching",
     "threshold": 0.75,
-    "description": "「自己发现」鬼王卡片右上角的「集结」印章；只在卡片出现后才有，用于确认召唤成功并作为打开分享弹窗的入口"
+    "description": "「自己发现」鬼王卡片右上角的「集结」印章本体（只取印章，不含下方会跳动的「xx:xx 后公开」倒计时，否则实机只有 0.70 分卡在阈值下）；只在卡片出现后才有，用于确认召唤成功并作为打开分享弹窗的入口"
+  },
+  {
+    "itemName": "cgwa_self_card",
+    "imageName": "cgwa_self_card.png",
+    "roiFront": "142,142,96,28",
+    "roiBack": "120,135,240,110",
+    "method": "Template matching",
+    "threshold": 0.8,
+    "description": "「自己发现」鬼王卡片上的「剩余时间」四个字（静态文字，不含会变化的倒计时数字）；搜索区只覆盖上半部分，用于判定进入界面时已经有一只召唤好的鬼王，此时不得再点召唤"
   },
   {
     "itemName": "cgwa_public",
