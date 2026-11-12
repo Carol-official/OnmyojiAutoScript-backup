@@ -52,8 +52,12 @@ PREPARE_AFTER_CHALLENGE = 2.0   # 点完「挑战」后留给游戏加载准备�
 PREPARE_AFTER_CLICK = 1.5       # 每次点完「准备」后等待游戏响应的时间
 PREPARE_CONFIRM_TIMEOUT = 45    # 确认「已进入战斗」的总超时
 PREPARE_RETRY_INTERVAL = 2.5    # 两次补点之间的最小间隔
-PREPARE_FIRST_GRACE = 8.0       # 首次点「准备」后的宽限：游戏要加载约 6 秒才真正开战，
-                                # 与补点间隔解耦，避免把正常加载误判成「点击没生效」
+PREPARE_FIRST_GRACE = 15.0      # 首次点「准备」后的宽限：2026-11-13 实机日志显示
+                                # 点「准备」→ 真正开战约 11.5 秒（点击→补点 10 秒、
+                                # 补点→开战 1.5 秒），旧的 8 秒会把加载期误判成
+                                # 「点击没生效」，每只鬼王都补点一次并打 WARNING。
+                                # 与补点间隔解耦：正常加载期内完全不补点，
+                                # 真被吞时 15 秒后才开始按短间隔恢复
 PREPARE_RETRY_LIMIT = 6         # 最多补点次数
 
 # 点击「召唤鬼王」「挑战」按钮之前的随机等待区间（秒）。
@@ -482,8 +486,9 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
           1. 出现战斗信息图标 I_BATTLE_INFO（准备界面实测不匹配）；
           2. 出现胜利/失败结算画面（战斗可能很快结束）；
           3. 准备按钮连续 3 帧不再出现。
-        首次点击单独给 PREPARE_FIRST_GRACE 秒宽限（游戏加载约 6 秒），
-        之后仍在准备界面才按 PREPARE_RETRY_INTERVAL 间隔补点，
+        首次点击单独给 PREPARE_FIRST_GRACE 秒宽限：点「准备」后游戏还要加载
+        十来秒才真正开战，这段时间高亮准备按钮一直可见，不代表点击被吞。
+        宽限期内只等不点，之后仍在准备界面才按 PREPARE_RETRY_INTERVAL 间隔补点，
         最多 PREPARE_RETRY_LIMIT 次，补点日志级别保持 WARNING 不变。
         """
         timer = Timer(PREPARE_CONFIRM_TIMEOUT).start()
@@ -492,6 +497,7 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
         grace = Timer(PREPARE_FIRST_GRACE).start()
         retries = 0
         gone = 0
+        loading_logged = False
         while 1:
             self.screenshot()
             if (self.appear(self.I_BATTLE_INFO)
@@ -501,9 +507,15 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
                 logger.info('已确认进入战斗')
                 return True
             if self.appear(self.I_PREPARE_HIGHLIGHT):
-                # 高亮准备按钮还在，说明上一次点击没生效
+                # 高亮准备按钮仍在时优先按「游戏正在加载」处理，而不是「点击被吞」。
+                # 宽限期内一次都不补点，正常加载就不会再打出那条 WARNING；
+                # 只有宽限期结束仍停在准备界面，才开始按短间隔补点恢复
                 gone = 0
-                if grace.reached() and retries < PREPARE_RETRY_LIMIT:
+                if not grace.reached():
+                    if not loading_logged:
+                        logger.info(f'准备界面加载中，{PREPARE_FIRST_GRACE:.0f} 秒宽限期内不补点')
+                        loading_logged = True
+                elif retries < PREPARE_RETRY_LIMIT:
                     if self.click(self.C_CGW_PREPARE_CLICK, interval=PREPARE_RETRY_INTERVAL):
                         retries += 1
                         # 连续补点同一按钮会触发框架的防卡死保护，清掉点击记录

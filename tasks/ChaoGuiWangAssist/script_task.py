@@ -20,10 +20,11 @@
     5. 识别鬼王星级（圆形图标下方橙色勾玉个数），只处理勾选的星级；
        六个星级开关全不勾时任务启动即退出，识别到未勾选星级则推送并结束
     6. 不判疲劳、不点挑战：点「召唤鬼王」，再点卡片右上角的「集结」印章
-    7. 分享弹窗里只找配置指定的那一位好友（好友页签 → 寮友页签），
-       点中他再点「邀请」；两个页签都没有就关掉弹窗、不邀请任何人并结束任务
+    7. 分享弹窗里只找配置指定的那一位好友（好友页签 → 寮友页签），点中他再点
+       「邀请」；两个页签都没有就按 30 秒间隔重试，连续 3 次失败才结束任务并推送
     8. 每 wait_interval 秒检查一次「自己发现」鬼面是否重新出现：
-       重现 = 好友击杀成功 = 邀请成功一次；超过 wait_timeout 则推送提醒后继续等
+       重现 = 好友击杀成功 = 邀请成功一次；等待期间每隔随机 1~2 分钟重新邀请
+       同一位好友一次；超过 wait_timeout 则推送提醒后继续等
 
 协战模式：
     4. 只看「好友发现」区域：
@@ -39,7 +40,7 @@
          公开判断不再静默；三种特征都读不到时先按 1 秒间隔重试 3 轮才做界面诊断
 
 推送：只保留任务完成、任务完全失败、打完所选星级、无协战鬼王、邀请超时、
-未找到指定好友、连续协战失败、任务结束汇总八类，各有独立开关，
+未找到指定好友、连续邀请失败、连续协战失败、任务结束汇总九类，各有独立开关，
 并受 notify_enable 总开关控制；按需求，成功次数不在过程中逐条推送，
 只在结束汇总里给出。
 
@@ -81,6 +82,14 @@ UNKNOWN_RETRY_INTERVAL = 1.0
 # 候选点都放在左侧「好友发现」的空白区域（鬼面空位、「暂无好友发现鬼王」文字），
 # 刻意避开右下角「挑战」按钮 —— 那里点了会直接开打，属于邀请模式绝不允许的动作。
 SHARE_BLANK_POINTS = [(170, 600), (170, 500)]
+# 邀请成功后等待好友击杀期间，周期性重新邀请同一位好友的间隔（秒）。
+# 需求是「每隔 1~2 分钟再邀请一次」，用随机区间避免固定节奏
+REINVITE_INTERVAL_MIN = 60
+REINVITE_INTERVAL_MAX = 120
+# 邀请失败（分享弹窗里没找到指定好友 / 弹窗没打开）后的重试间隔（秒）
+INVITE_RETRY_INTERVAL = 30
+# 连续多少次邀请失败就结束任务并推送
+INVITE_FAIL_LIMIT = 3
 
 
 class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
@@ -374,17 +383,27 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
                 return 'NONE'
             sleep(SELF_DEMON_INTERVAL)
 
-    def wait_demon_return(self, cfg) -> str:
+    def wait_demon_return(self, cfg, reinvite: bool = False) -> str:
         """分享后等好友把鬼王打掉、鬼面重新出现。
 
         每 wait_interval 秒检查一次，最多等 wait_timeout 秒：
-        'READY'   鬼面重新出现 → 好友击杀成功；
-        'EMPTY'   门票已打完（金色鬼面），本任务随之结束；
-        'TIMEOUT' 超时（好友始终没打完），由调用方推送提醒后继续等。
+        'READY'           鬼面重新出现 → 好友击杀成功；
+        'EMPTY'           门票已打完（金色鬼面），本任务随之结束；
+        'TIMEOUT'         超时（好友始终没打完），由调用方推送提醒后继续等；
+        'REINVITE_FAILED' 等待期间连续 INVITE_FAIL_LIMIT 次重新邀请失败。
+
+        reinvite=True 时（邀请模式主循环），等待期间每隔随机 1~2 分钟重新
+        邀请一次同一位好友；某次重邀失败就改成 30 秒后再试，连续失败达到
+        上限就返回 REINVITE_FAILED 让主循环结束任务并推送。击杀检查始终在
+        每轮循环里，重邀期间不会漏掉好友击杀。
         """
         timer = Timer(cfg.wait_timeout).start()
         logger.info(f'等待好友击杀，每 {cfg.wait_interval} 秒检查一次，'
                     f'最长等待 {cfg.wait_timeout} 秒')
+        reinvite_timer = (Timer(random.uniform(REINVITE_INTERVAL_MIN,
+                                               REINVITE_INTERVAL_MAX)).start()
+                          if reinvite else None)
+        fail_streak = 0
         while 1:
             self.keep_alive()
             self.screenshot()
@@ -393,10 +412,36 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
                 return 'READY'
             # 卡片还在说明好友还没打完；此时圆形图标区域的金色像素不代表门票耗尽，
             # 所以只在没有卡片时才做门票判定，避免误判成任务完成
-            if not self.self_card_exists() and self.ticket_empty_confirmed():
+            card_here = self.self_card_exists()
+            if not card_here and self.ticket_empty_confirmed():
                 return 'EMPTY'
             if self.ui_reward_appear_click():
                 continue
+            # 卡片还在、好友还没打完：到点就重新邀请同一位好友。
+            # 卡片已消失时绝不重邀 —— 那只鬼王已经结束，重邀必然失败
+            if reinvite_timer is not None and card_here and reinvite_timer.reached():
+                status = self.share_demon(cfg)
+                if status == 'OK':
+                    fail_streak = 0
+                    next_in = random.uniform(REINVITE_INTERVAL_MIN, REINVITE_INTERVAL_MAX)
+                    logger.info(f'等待期间已再次邀请「{cfg.share_friend_name}」，'
+                                f'{next_in:.0f} 秒后再次邀请')
+                    reinvite_timer = Timer(next_in).start()
+                elif status == 'ALREADY':
+                    # 「集结」印章已不在（此前集结过），没有可点的集结入口。
+                    # 跳过本次重邀，不计失败，按正常节奏下次再检查
+                    next_in = random.uniform(REINVITE_INTERVAL_MIN, REINVITE_INTERVAL_MAX)
+                    logger.info(f'等待期间「集结」印章已不在，跳过本次重复邀请，'
+                                f'{next_in:.0f} 秒后再检查')
+                    reinvite_timer = Timer(next_in).start()
+                else:
+                    fail_streak += 1
+                    logger.warning(f'等待期间重复邀请失败（{status}，连续第 '
+                                   f'{fail_streak}/{INVITE_FAIL_LIMIT} 次），'
+                                   f'{INVITE_RETRY_INTERVAL} 秒后重试')
+                    if fail_streak >= INVITE_FAIL_LIMIT:
+                        return 'REINVITE_FAILED'
+                    reinvite_timer = Timer(INVITE_RETRY_INTERVAL).start()
             if timer.reached():
                 logger.warning(f'等待好友击杀超时（{cfg.wait_timeout} 秒）')
                 return 'TIMEOUT'
@@ -528,11 +573,39 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
         self.click(self.C_CGWA_SHARE_INVITE)
         return 'OK' if self.wait_share_closed() else 'FAIL'
 
+    def invite_first(self, cfg) -> str:
+        """本轮首次邀请，没找到好友 / 分享失败时按 30 秒间隔重试。
+
+        返回 'OK' / 'ALREADY' / 'FAILED'：
+        'OK'      已成功邀请指定好友；
+        'ALREADY' 进入界面时就已有的卡片、印章不在，推定此前已集结/邀请过；
+        'FAILED'  连续 INVITE_FAIL_LIMIT 次邀请失败，主循环结束任务并推送。
+
+        旧实现只要一次「没找到好友」就立刻结束任务；好友列表偶发加载慢时会
+        白白终止整轮。现在给三次机会，每次重试都重新走一遍集结弹窗。
+        """
+        fails = 0
+        while 1:
+            self.keep_alive()
+            status = self.share_demon(cfg)
+            if status in ('OK', 'ALREADY'):
+                return status
+            fails += 1
+            logger.warning(f'邀请指定好友失败（{status}，连续第 '
+                           f'{fails}/{INVITE_FAIL_LIMIT} 次）')
+            if fails >= INVITE_FAIL_LIMIT:
+                return 'FAILED'
+            logger.info(f'{INVITE_RETRY_INTERVAL} 秒后重新打开集结弹窗再邀请一次')
+            # 分段等待并持续重置设备卡死计时器，避免长等待触发 GameStuckError
+            for _ in range(INVITE_RETRY_INTERVAL):
+                self.keep_alive()
+                sleep(1)
+
     def run_invite(self, cfg) -> tuple:
         """邀请模式主循环，返回 (邀请成功次数, 结束原因, 结束类型)。
 
         结束类型用于决定结束推送的标题与开关：
-        COMPLETE / STAR_CLEARED / FAILED。
+        COMPLETE / STAR_CLEARED / REINVITE_FAILED / FAILED。
         """
         invited = 0
         timeouts = 0
@@ -575,29 +648,22 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
                                          f'共成功邀请 {invited} 只'), 'FAILED'
                     continue
 
-            # READY 已召唤 / EXISTING 已有卡片：只分享给指定好友
-            status = self.share_demon(cfg)
-            if status == 'FRIEND_MISSING':
-                # 只邀请特定好友，找不到就不邀请任何人，也不改分享给别人，直接结束
-                return invited, (f'分享弹窗里没有指定好友「{cfg.share_friend_name}」，'
-                                 f'按设置不邀请其他人，任务结束，共成功邀请 {invited} 只'), \
-                       'FRIEND_MISSING'
+            # READY 已召唤 / EXISTING 已有卡片：只分享给指定好友。
+            # 没找到好友 / 分享失败时按 30 秒重试，连续三次才结束任务并推送
+            status = self.invite_first(cfg)
+            if status == 'FAILED':
+                return invited, (f'连续 {INVITE_FAIL_LIMIT} 次邀请失败'
+                                 f'（未找到指定好友「{cfg.share_friend_name}」或分享弹窗未打开），'
+                                 f'任务结束，共成功邀请 {invited} 只'), 'REINVITE_FAILED'
             if status == 'ALREADY':
-                logger.info('这只鬼王此前已集结/邀请过，不重复发送邀请，直接等好友击杀')
-            elif status != 'OK':
-                timeouts += 1
-                logger.warning(f'分享鬼王失败（连续第 {timeouts} 次），做一次界面诊断')
-                if not self.diagnose_and_recover('分享鬼王') \
-                        or timeouts >= cfg.max_consecutive_timeout:
-                    return invited, (f'连续 {timeouts} 次分享失败且界面恢复失败，任务提前结束，'
-                                     f'共成功邀请 {invited} 只'), 'FAILED'
-                continue
+                logger.info('这只鬼王此前已集结/邀请过，不重复发送首次邀请，直接等好友击杀')
 
             timeouts = 0
-            # 分享已发出，等好友把这只鬼王打掉（鬼面重新出现）
+            # 邀请已发出，等好友把这只鬼王打掉（鬼面重新出现）；
+            # 等待期间每 1~2 分钟重邀一次，连续三次重邀失败则结束并推送
             wait_rounds = 0
             while 1:
-                result = self.wait_demon_return(cfg)
+                result = self.wait_demon_return(cfg, reinvite=True)
                 if result == 'READY':
                     invited += 1
                     logger.info(f'好友已击杀鬼王，邀请成功，累计 {invited} 只')
@@ -605,6 +671,10 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
                 if result == 'EMPTY':
                     return invited, (f'所有鬼王门票已打完（图标显示金色鬼面），'
                                      f'共成功邀请 {invited} 只'), 'COMPLETE'
+                if result == 'REINVITE_FAILED':
+                    return invited, (f'等待好友击杀期间连续 {INVITE_FAIL_LIMIT} 次重复邀请失败'
+                                     f'（未找到指定好友「{cfg.share_friend_name}」或分享弹窗未打开），'
+                                     f'任务结束，共成功邀请 {invited} 只'), 'REINVITE_FAILED'
                 # TIMEOUT：按配置推送提醒后继续等，不结束任务
                 wait_rounds += 1
                 self.push('超鬼王协战·邀请超时',
@@ -868,6 +938,7 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
             'STAR_CLEARED': ('超鬼王协战·打完所选星级鬼王', cfg.notify_star_cleared),
             'NO_ASSIST': ('超鬼王协战·无协战鬼王', cfg.notify_no_assist),
             'FRIEND_MISSING': ('超鬼王协战·未找到指定好友', cfg.notify_friend_missing),
+            'REINVITE_FAILED': ('超鬼王协战·连续邀请失败', cfg.notify_friend_missing),
             'DEFEAT_LIMIT': ('超鬼王协战·连续协战失败', cfg.notify_defeat_limit),
             'FAILED': ('超鬼王协战·任务完全失败', cfg.notify_task_failed),
             'END': ('超鬼王协战·任务汇总', cfg.notify_summary),
