@@ -256,8 +256,9 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
     def self_card_exists(self) -> bool:
         """「自己发现」是否已经有召唤好的鬼王卡片。
 
-        卡片标签是静态的「剩余时间」四字，集结印章可能被点过而消失，
-        两者任一命中都算卡片在；都不命中才是可召唤状态。
+        卡片标签是静态的「剩余时间」四字；「集结」印章在这只鬼王存在期间
+        不会消失（邀请过之后仍然可见），两者任一命中都算卡片在，互为容错；
+        都不命中才是可召唤状态 / 鬼王已被击杀。
         """
         return self.appear(self.I_CGWA_SELF_CARD) or self.appear(self.I_CGWA_GATHER_SELF)
 
@@ -394,10 +395,11 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
         'REINVITE_FAILED' 等待期间连续 INVITE_FAIL_LIMIT 次重新邀请失败。
 
         reinvite=True 时（邀请模式主循环），等待期间每隔随机 1~2 分钟重新
-        邀请一次同一位好友；某次重邀失败就改成 30 秒后再试，连续失败达到
-        上限就返回 REINVITE_FAILED 让主循环结束任务并推送。重邀动作本身是
-        同步的，结束后下一轮仍会检查鬼面是否重现，不会漏掉好友击杀，
-        但可能延迟一个重邀动作的耗时。
+        点「集结」邀请一次同一位好友 —— 「集结」印章在鬼王存在期间不会
+        消失，邀请过之后仍能再次点开集结弹窗；某次重邀失败就改成 30 秒后
+        再试，连续失败达到上限就返回 REINVITE_FAILED 让主循环结束任务并
+        推送。重邀动作本身是同步的，结束后下一轮仍会检查鬼面是否重现，
+        不会漏掉好友击杀，但可能延迟一个重邀动作的耗时。
         """
         timer = Timer(cfg.wait_timeout).start()
         logger.info(f'等待好友击杀，每 {cfg.wait_interval} 秒检查一次，'
@@ -428,13 +430,6 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
                     next_in = random.uniform(REINVITE_INTERVAL_MIN, REINVITE_INTERVAL_MAX)
                     logger.info(f'等待期间已再次邀请「{cfg.share_friend_name}」，'
                                 f'{next_in:.0f} 秒后再次邀请')
-                    reinvite_timer = Timer(next_in).start()
-                elif status == 'ALREADY':
-                    # 「集结」印章已不在（此前集结过），没有可点的集结入口。
-                    # 跳过本次重邀，不计失败，按正常节奏下次再检查
-                    next_in = random.uniform(REINVITE_INTERVAL_MIN, REINVITE_INTERVAL_MAX)
-                    logger.info(f'等待期间「集结」印章已不在，跳过本次重复邀请，'
-                                f'{next_in:.0f} 秒后再检查')
                     reinvite_timer = Timer(next_in).start()
                 else:
                     fail_streak += 1
@@ -550,16 +545,19 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
 
         返回 'OK'             已成功邀请指定好友；
             'FRIEND_MISSING' 弹窗里没有指定好友，不邀请任何人并关掉弹窗；
-            'ALREADY'        卡片还在但「集结」印章不在，说明这只鬼王已经集结/邀请过，
-                             不重复邀请，直接去等好友击杀；
-            'FAIL'           既没有卡片也没有印章 / 弹窗没打开 / 点了邀请但没关掉。
+            'FAIL'           没等到「集结」印章 / 弹窗没打开 / 点了邀请但没关掉。
+
+        「集结」印章在这只鬼王存在期间不会消失，邀请过之后仍然可以再点开集结
+        弹窗重复邀请（周期重邀正是靠这一点）。因此印章没检出只可能是识别
+        抖动或界面尚未加载，一律按失败交给上层按 30 秒重试，绝不能推定成
+        「此前已邀请过」而跳过邀请 —— 那样会让好友根本收不到邀请。
         """
         if not self.wait_appear(self.I_CGWA_GATHER_SELF, timeout=GATHER_APPEAR_TIMEOUT):
             self.screenshot()
             if self.self_card_exists() or self.appear(self.I_CGW_CHALLENGE):
-                logger.warning('「集结」印章不在但鬼王卡片还在，判定这只鬼王已经集结/邀请过，'
-                               '本轮不重复邀请，直接进入等待好友击杀')
-                return 'ALREADY'
+                logger.warning('鬼王卡片还在但未检出「集结」印章，按识别抖动处理；'
+                               '本次不邀请任何人，交由上层重试')
+                return 'FAIL'
             logger.warning('未等到「集结」印章，也无法确认鬼王卡片，无法分享鬼王')
             return 'FAIL'
         self.click(self.I_CGWA_GATHER_SELF)
@@ -576,20 +574,16 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
         return 'OK' if self.wait_share_closed() else 'FAIL'
 
     def invite_first(self, cfg) -> str:
-        """本轮首次邀请，没找到好友 / 分享失败时按 30 秒间隔重试。
+        """本轮首次邀请，没找到好友 / 没检出印章 / 分享失败时按 30 秒间隔重试。
 
-        返回 'OK' / 'ALREADY' / 'FAILED'：
-        'OK'      已成功邀请指定好友；
-        'ALREADY' 首次就发现印章不在（进入界面时已有卡片），推定此前已集结/邀请过；
-        'FAILED'  连续 INVITE_FAIL_LIMIT 次邀请失败，主循环结束任务并推送。
+        返回 'OK' / 'FAILED'：
+        'OK'     已成功邀请指定好友；
+        'FAILED' 连续 INVITE_FAIL_LIMIT 次邀请失败，主循环结束任务并推送。
 
         旧实现只要一次「没找到好友」就立刻结束任务；好友列表偶发加载慢时会
         白白终止整轮。现在给三次机会，每次重试都重新走一遍集结弹窗。
-
-        注意区分两种 ALREADY：首次就返回 ALREADY 是「进入界面时已有卡片」的
-        合法历史状态，直接放行；但失败后重试才出现 ALREADY，说明本轮已经
-        点过「集结」印章、弹窗无法再打开，绝不能当成「已邀请过」放行——
-        否则第一次没找到好友、第二次就误判成功，连续三次失败永远不会触发。
+        因为「集结」印章在鬼王存在期间不会消失，每次重试都能重新点开弹窗，
+        不存在「印章被点掉导致无法再邀请」的情况。
         """
         fails = 0
         while 1:
@@ -597,8 +591,6 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
             status = self.share_demon(cfg)
             if status == 'OK':
                 return 'OK'
-            if status == 'ALREADY' and fails == 0:
-                return 'ALREADY'
             fails += 1
             logger.warning(f'邀请指定好友失败（{status}，连续第 '
                            f'{fails}/{INVITE_FAIL_LIMIT} 次）')
@@ -664,9 +656,6 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
                 return invited, (f'连续 {INVITE_FAIL_LIMIT} 次邀请失败'
                                  f'（未找到指定好友「{cfg.share_friend_name}」或分享弹窗未打开），'
                                  f'任务结束，共成功邀请 {invited} 只'), 'REINVITE_FAILED'
-            if status == 'ALREADY':
-                logger.info('这只鬼王此前已集结/邀请过，不重复发送首次邀请，直接等好友击杀')
-
             timeouts = 0
             # 邀请已发出，等好友把这只鬼王打掉（鬼面重新出现）；
             # 等待期间每 1~2 分钟重邀一次，连续三次重邀失败则结束并推送
