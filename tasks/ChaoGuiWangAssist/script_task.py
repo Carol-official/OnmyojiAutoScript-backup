@@ -578,18 +578,25 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
 
         返回 'OK' / 'ALREADY' / 'FAILED'：
         'OK'      已成功邀请指定好友；
-        'ALREADY' 进入界面时就已有的卡片、印章不在，推定此前已集结/邀请过；
+        'ALREADY' 首次就发现印章不在（进入界面时已有卡片），推定此前已集结/邀请过；
         'FAILED'  连续 INVITE_FAIL_LIMIT 次邀请失败，主循环结束任务并推送。
 
         旧实现只要一次「没找到好友」就立刻结束任务；好友列表偶发加载慢时会
         白白终止整轮。现在给三次机会，每次重试都重新走一遍集结弹窗。
+
+        注意区分两种 ALREADY：首次就返回 ALREADY 是「进入界面时已有卡片」的
+        合法历史状态，直接放行；但失败后重试才出现 ALREADY，说明本轮已经
+        点过「集结」印章、弹窗无法再打开，绝不能当成「已邀请过」放行——
+        否则第一次没找到好友、第二次就误判成功，连续三次失败永远不会触发。
         """
         fails = 0
         while 1:
             self.keep_alive()
             status = self.share_demon(cfg)
-            if status in ('OK', 'ALREADY'):
-                return status
+            if status == 'OK':
+                return 'OK'
+            if status == 'ALREADY' and fails == 0:
+                return 'ALREADY'
             fails += 1
             logger.warning(f'邀请指定好友失败（{status}，连续第 '
                            f'{fails}/{INVITE_FAIL_LIMIT} 次）')
