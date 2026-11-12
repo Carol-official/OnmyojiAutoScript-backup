@@ -45,6 +45,9 @@ class ChaoGuiWangAssets:
 	I_CGW_SETTLE = RuleImage(roi_front=(690,40,300,160), roi_back=(550,0,650,260), threshold=0.75, method="Template matching", file="./tasks/ChaoGuiWang/cgw/cgw_cgw_settle.png")
 	# 限定时间内未击杀鬼王时的挑战失败结算界面，只取失败二字区域
 	I_CGW_SETTLE_FAIL = RuleImage(roi_front=(585,55,290,120), roi_back=(520,0,440,260), threshold=0.75, method="Template matching", file="./tasks/ChaoGuiWang/cgw/cgw_cgw_settle_fail.png")
+	# 战斗界面左上角「当前成绩」四字。只有识别到它才认为「准备」点击生效、战斗真正开始；
+	# 不含下方会变化的成绩数字，也不含用户标注用的红框线
+	I_CGW_CURRENT_SCORE = RuleImage(roi_front=(47,81,130,38), roi_back=(20,60,200,90), threshold=0.8, method="Template matching", file="./tasks/ChaoGuiWang/cgw/cgw_current_score.png")
 
 
 	# Ocr Rule Assets

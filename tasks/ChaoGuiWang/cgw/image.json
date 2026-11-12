@@ -70,5 +70,14 @@
     "method": "Template matching",
     "threshold": 0.75,
     "description": "限定时间内未击杀鬼王时的挑战失败结算界面，只取「失败」二字区域"
+  },
+  {
+    "itemName": "cgw_current_score",
+    "imageName": "cgw_current_score.png",
+    "roiFront": "47,81,130,38",
+    "roiBack": "20,60,200,90",
+    "method": "Template matching",
+    "threshold": 0.8,
+    "description": "战斗界面左上角「当前成绩」四字。只有识别到它才认为「准备」点击生效、战斗真正开始；不含下方会变化的成绩数字与用户标注红框"
   }
 ]

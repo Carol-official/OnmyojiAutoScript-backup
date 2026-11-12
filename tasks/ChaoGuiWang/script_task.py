@@ -479,16 +479,18 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
     def confirm_battle_started(self) -> bool:
         """步骤 8 的闭环：确认「准备」点击真的生效，没生效就 WARNING 重新点。
 
-        实机 2026-11-13 04:11:56 一轮证明「准备按钮消失」不能当作点击成功：
-        点下去按钮会有按下/变色动画，I_PREPARE_HIGHLIGHT 会短暂不匹配，
+        按用户指定的判据：只有识别到战斗界面左上角「当前成绩」四字，
+        才认为「准备」点进去了、战斗真正开始。准备界面不会有这行字。
+        实机 2026-11-13 04:11:56 一轮证明「按钮消失」不能当作成功：
+        点击时按钮有按下/变色动画，I_PREPARE_HIGHLIGHT 会短暂不匹配，
         旧版据此返回成功，实际还停在准备界面，最后等来的却是
         「挑战失败（未在限定时间内击杀）」。
-        因此成功只认真正的开战证据，准备按钮只用来决定「要不要补点」：
-          1. 出现战斗信息 / 结算画面 → 已开战，成功；
-          2. 高亮准备按钮仍在且观察窗口已过 → 点击被吞，WARNING 并重新点，
+        判据：
+          1. 出现「当前成绩」→ 开战成功；
+          2. 出现结算画面（战斗极快结束、来不及截到「当前成绩」）→ 成功；
+          3. 高亮准备按钮仍在且观察窗口已过 → 点击被吞，WARNING 并重新点，
              最多 PREPARE_RETRY_LIMIT 次；
-          3. 按钮变暗或短暂消失 → 只等开战证据，既不补点也不判成功；
-             按钮恢复高亮后按 2 处理。
+          4. 按钮变暗或短暂消失 → 只等开战证据，既不补点也不判成功。
         补点日志级别保持 WARNING 不变。
         """
         timer = Timer(PREPARE_CONFIRM_TIMEOUT).start()
@@ -497,11 +499,15 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
         observe = Timer(PREPARE_OBSERVE_WINDOW).start()
         while 1:
             self.screenshot()
-            if (self.appear(self.I_BATTLE_INFO)
-                    or self.appear(self.I_CGW_SETTLE)
+            # 唯一可靠的开战判据：战斗界面左上角「当前成绩」字样
+            if self.appear(self.I_CGW_CURRENT_SCORE):
+                logger.info('识别到「当前成绩」，确认「准备」已生效、战斗已开始')
+                return True
+            # 战斗可能在两次截图之间就结束，结算画面同样算成功
+            if (self.appear(self.I_CGW_SETTLE)
                     or self.appear(self.I_CGW_SETTLE_FAIL)
                     or self.appear(self.I_WIN)):
-                logger.info('已确认进入战斗')
+                logger.info('已出现结算画面，确认「准备」已生效')
                 return True
             # 超时判定放在所有 continue 之前，避免奖励弹窗一直弹出时跳过超时
             if timer.reached():
