@@ -8,7 +8,8 @@
     4. 读取右上角疲劳度，超过阈值则推送并停止
     5. 召唤鬼王前先识别鬼王星级（圆形图标下方的橙色勾玉数量 = 星级）
     6. 点击右下角「召唤鬼王」
-    7. 点击右下角「挑战」
+    7. 先随机等 1.8~2.8 秒（等召唤动画画完），再读右下角「强力追击」开关，
+       按该星级的「是否强追」切好模式，最后点击右下角「挑战」
     8. 点击右下角「准备」，等待鬼王打完（最多 200 秒）
     9. 结算界面点击用户标注的三个安全区域之一
    10. 胜利计入一只并回到第 3 步；失败不计入，直接继续点「挑战」重打同一只鬼王
@@ -129,6 +130,10 @@ CARD_FINGERPRINT_SIZE = 12                  # 缩小到 12x12 再比较
 CARD_FINGERPRINT_DIFF = 6.0                 # 平均灰度差 <= 6 视为同一只鬼王（实测同图 0~1.5、不同图 11+）
 
 # ---------------- 点击「挑战」前的强追 / 普追切换 ----------------
+# 读开关前先等界面稳定：召唤鬼王后右下角卡片与开关要 1.5~2.5 秒才画完整。
+# 2026-11-13 实机：点「召唤」后 1.0 秒读到 对号 0.301 / 圆圈 0.180 → UNKNOWN，
+# 同一界面稳定后圆圈 0.9995，说明那一帧开关还压在浮现动画下面。
+PURSUIT_STATE_SETTLE_DELAY = (1.8, 2.8)   # 读开关前随机等待（秒）
 PURSUIT_SWITCH_VERIFY = 3       # 切换后最多复核几帧，确认开关真的翻过去了
 PURSUIT_SWITCH_INTERVAL = 0.6   # 复核帧间隔（秒）
 
@@ -570,6 +575,11 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
         target = 'ON' if want_on else 'OFF'
         text = '强追' if want_on else '普追'
         star_text = STAR_NAMES.get(star, '未知星级')
+        # 召唤鬼王后右下角卡片/开关还在浮现动画里，过早读只能匹配到背景。
+        # 统一先随机等一会儿（不召唤的重打同样适用，只多花约 2 秒），再读开关。
+        delay = random.uniform(*PURSUIT_STATE_SETTLE_DELAY)
+        logger.info(f'读取强追/普追开关前等待 {delay:.2f} 秒，等界面绘制完成')
+        sleep(delay)
         state = self.pursuit_state()
         if state == target:
             logger.info(f'{star_text}按设置为{text}模式，开关已是 {state}，无需切换')
