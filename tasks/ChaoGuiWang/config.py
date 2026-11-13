@@ -36,7 +36,9 @@ class ChaoGuiWangConfig(ConfigBase):
     # 同一星级的攻打/强追连在一起，一屏能看全。
     # 这里刻意不写 description —— oasx 会把 description 渲染成标题下面的一行说明，
     # 每条开关因此变成两行高，12 条就撑满两屏；去掉后每条只剩一行短标题。
-    # 显示用的短标题在 assets/i18n/zh-CN.json（键名 = 字段名），形如「1星·攻打」。
+    # 显示用的标题在 assets/i18n/zh-CN.json（键名 = 字段名）：
+    # 每个星级的第一条写成「N 星鬼王：攻打」充当分组表头，同星级的其余开关
+    # 只留缩进（全角空格）对齐到「攻打」那一列，视觉上是一块一块的。
     cgw_fight_star_1: bool = True
     cgw_pursuit_star_1: bool = False
     cgw_fight_star_2: bool = True

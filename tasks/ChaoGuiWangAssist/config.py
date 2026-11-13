@@ -37,7 +37,9 @@ class ChaoGuiWangAssistConfig(ConfigBase):
     # 同一星级的攻打/邀请/强追连在一起，18 条能一屏看全。
     # 这里刻意不写 description —— oasx 会把 description 渲染成标题下面的一行说明，
     # 每条开关因此变成两行高，18 条要占两屏多；去掉后每条只剩一行短标题。
-    # 显示用的短标题在 assets/i18n/zh-CN.json（键名 = 字段名），形如「1星·攻打」。
+    # 显示用的标题在 assets/i18n/zh-CN.json（键名 = 字段名）：
+    # 每个星级的第一条写成「N 星鬼王：攻打」充当分组表头，同星级的邀请/强追
+    # 只留缩进（全角空格）对齐到「攻打」那一列，视觉上是一块一块的。
     cgwa_fight_star_1: bool = True
     cgwa_invite_star_1: bool = True
     cgwa_pursuit_star_1: bool = False
