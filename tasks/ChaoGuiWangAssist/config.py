@@ -120,7 +120,13 @@ class ChaoGuiWangAssistConfig(ConfigBase):
                                           '邀请模式超时会推送提醒后继续等待；'
                                           '协战模式超时会推送「无协战鬼王」并结束任务')
 
-    # ---------------- 协战模式：战斗保护 ----------------
+    # ---------------- 协战模式：疲劳与战斗保护 ----------------
+    # 疲劳度只在协战模式判断：进入祸主降临界面后一次，每次胜利/失败结算后各一次。
+    # 邀请模式全程不战斗、不消耗疲劳，因此不参与判断。
+    fatigue_limit: int = Field(default=90, ge=1, le=100,
+                               description='疲劳度上限为100。协战模式在进入祸主降临界面后、'
+                                           '以及每次胜利/失败结算后都会读右上角疲劳度，'
+                                           '当前值超过该阈值就推送并停止任务')
     battle_timeout: int = Field(default=200, ge=30, le=600,
                                 description='协战点击准备后等待战斗结束并结算的最长秒数')
     max_consecutive_defeat: int = Field(default=3, ge=1, le=20,
@@ -154,6 +160,8 @@ class ChaoGuiWangAssistConfig(ConfigBase):
                                                     '为不误邀请其他人而结束任务时是否推送')
     notify_defeat_limit: bool = Field(default=True,
                                       description='连续协战失败达到上限、任务停止时是否推送')
+    notify_fatigue_limit: bool = Field(default=True,
+                                       description='疲劳度超过阈值、任务停止时是否推送（协战模式）')
     notify_summary: bool = Field(default=True,
                                  description='任务结束时是否推送一次汇总（含成功次数与总耗时）')
 

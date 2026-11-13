@@ -223,6 +223,8 @@
   "kill_count_help": "完成一次完整的召唤到结算流程计一只，达到该数量后推送并结束任务",
   "fatigue_limit": "疲劳度阈值",
   "fatigue_limit_help": "疲劳度上限为100，当前值超过该阈值时推送并停止任务",
+  "notify_fatigue_limit": "超过疲劳阈值时推送",
+  "notify_fatigue_limit_help": "协战模式疲劳度超过阈值、任务停止时是否推送",
   "wait_icon_timeout": "等待鬼面图标超时(秒)",
   "wait_icon_interval": "鬼面图标检查间隔(秒)",
   "battle_timeout": "单场战斗超时(秒)",

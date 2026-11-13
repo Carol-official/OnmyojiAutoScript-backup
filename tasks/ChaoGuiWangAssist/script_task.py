@@ -27,7 +27,9 @@
        同一位好友一次；超过 wait_timeout 则推送提醒后继续等
 
 协战模式：
-    4. 只看「好友发现」区域：
+    4. 刚进入祸主降临界面先读一次右上角疲劳度：未超过阈值才继续，
+       超过阈值（或连续识别失败）立即推送并结束任务
+    5. 只看「好友发现」区域：
        - 鬼面空位图标存在 → 没有可协战鬼王，每 wait_interval 秒重查，
          超过 wait_timeout 仍存在则推送「无协战鬼王」并结束
        - 鬼王卡片带「已公开」印章 → 按需求忽略，继续等待。印章有两个模板
@@ -38,12 +40,15 @@
          出现一次胜利结算即协战成功一只
        - 每轮把「卡片 / 已公开印章×2 / 空位鬼面」四个模板分数与最终结论写进日志，
          公开判断不再静默；三种特征都读不到时先按 1 秒间隔重试 3 轮才做界面诊断
+    6. 每次胜利结算或失败结算后，都先读一次疲劳度再决定是否继续：
+       超过阈值即推送并结束任务（失败结算的疲劳判断在「连续失败上限」之前）
 
 推送：只保留任务完成、任务完全失败、打完所选星级、无协战鬼王、邀请超时、
-未找到指定好友、连续邀请失败、连续协战失败、任务结束汇总九类；其中
-「连续邀请失败」与「未找到指定好友」共用 notify_friend_missing 开关，
-其余各有独立开关，并受 notify_enable 总开关控制；按需求，成功次数不在
-过程中逐条推送，只在结束汇总里给出。
+未找到指定好友、连续邀请失败、超过疲劳阈值、连续协战失败、任务结束汇总十类；
+其中「连续邀请失败」与「未找到指定好友」共用 notify_friend_missing 开关，
+「超过疲劳阈值」用 notify_fatigue_limit 开关，其余各有独立开关，
+并受 notify_enable 总开关控制；按需求，成功次数不在过程中逐条推送，
+只在结束汇总里给出。
 
 所有点击（含继承来的入口、召唤、挑战、准备、结算点击）都会先随机等待
 click_delay_min~click_delay_max 秒（默认 1.5~3 秒），通过重写 click /
@@ -91,6 +96,10 @@ REINVITE_INTERVAL_MAX = 120
 INVITE_RETRY_INTERVAL = 30
 # 连续多少次邀请失败就结束任务并推送
 INVITE_FAIL_LIMIT = 3
+# 疲劳度判断结果（get_fatigue 内部已重试 3 次，仍读不到才返回 UNKNOWN）
+FATIGUE_OK = 'OK'
+FATIGUE_OVER = 'OVER'
+FATIGUE_UNKNOWN = 'UNKNOWN'
 
 
 class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
@@ -697,6 +706,33 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
     # ------------------------------------------------------------------
     # 协战模式
     # ------------------------------------------------------------------
+    def check_fatigue(self, cfg, stage: str) -> tuple:
+        """读右上角疲劳度并与阈值比较，返回 (状态, 数值)。
+
+        状态为 FATIGUE_OK / FATIGUE_OVER / FATIGUE_UNKNOWN。父类的 get_fatigue
+        内部已经重试 3 次（每次间隔 1 秒），这里不再重复重试；本方法只读界面并
+        写日志，不做推送也不结束任务 —— 停不停、走哪个推送开关由调用方决定，
+        这样三处判断（进入界面 / 胜利结算 / 失败结算）共用一套读法。
+
+        判定用严格「超过」：等于阈值不算超，与父类 ChaoGuiWang 保持一致。
+        """
+        fatigue = self.get_fatigue()
+        if fatigue is None:
+            logger.warning(f'{stage}：右上角疲劳度连续 3 次识别失败，无法判断是否超阈值')
+            return FATIGUE_UNKNOWN, None
+        over = fatigue > cfg.fatigue_limit
+        logger.info(f'{stage}：当前疲劳度 {fatigue}/100，'
+                    f'{"超过" if over else "未超过"}阈值 {cfg.fatigue_limit}')
+        return (FATIGUE_OVER if over else FATIGUE_OK), fatigue
+
+    def fatigue_stop_reason(self, status: str, fatigue, cfg, stage: str) -> str:
+        """拼出因疲劳停止任务时的结束原因，供统一推送使用。"""
+        if status == FATIGUE_UNKNOWN:
+            return (f'{stage}时右上角疲劳度连续识别失败，无法确认是否超过阈值 '
+                    f'{cfg.fatigue_limit}，为避免超疲劳，任务提前停止')
+        return (f'{stage}时疲劳度 {fatigue}/100，已超过设定阈值 {cfg.fatigue_limit}，'
+                f'为避免继续消耗疲劳，任务停止')
+
     def friend_demon_state(self) -> str:
         """「好友发现」区域的状态，并把四个模板的分数与最终结论写进日志。
 
@@ -800,7 +836,7 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
         """协战模式主循环，返回 (协战成功次数, 结束原因, 结束类型)。
 
         结束类型用于决定结束推送的标题与开关：
-        NO_ASSIST / DEFEAT_LIMIT / FAILED。
+        FATIGUE / NO_ASSIST / DEFEAT_LIMIT / FAILED。
         """
         assists = 0
         defeats = 0
@@ -809,6 +845,15 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
         skip_timer = None
         unknown_streak = 0
         skipped_card = None      # 因星级被跳过的卡片指纹，同一只鬼王不要反复点
+
+        # 刚进入祸主降临界面，先判一次疲劳阈值：未超过才继续，超过直接推送并停止。
+        # 识别失败也按停止处理 —— 开局就无法确认疲劳时继续打，有超疲劳的风险。
+        self.wait_reward_settle()
+        status, fatigue = self.check_fatigue(cfg, '刚进入祸主降临界面')
+        if status != FATIGUE_OK:
+            return assists, self.fatigue_stop_reason(
+                status, fatigue, cfg, '刚进入祸主降临界面'), 'FATIGUE'
+
         while 1:
             self.keep_alive()
             # 上一只鬼王打完后可能还在「击败奖励结算中」，期间不能挑战
@@ -862,6 +907,16 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
                     timeouts = 0
                     skip_timer = None
                     logger.info(f'协战成功，累计 {assists} 只')
+                    # 胜利结算后先判疲劳：超过阈值就推送并停止，不再找下一只。
+                    # 胜利后主界面常出现「击败奖励结算中」提示，先等它散去，
+                    # 免得那层提示盖住右上角的疲劳数字被读成识别失败。
+                    # 真读不到只告警不停止（get_fatigue 已重试 3 次），
+                    # 下一次胜利/失败结算还会再判，不会一路打到底。
+                    self.wait_reward_settle()
+                    status, fatigue = self.check_fatigue(cfg, '胜利结算后')
+                    if status == FATIGUE_OVER:
+                        return assists, self.fatigue_stop_reason(
+                            status, fatigue, cfg, '胜利结算后'), 'FATIGUE'
                     continue
                 if result == 'GONE':
                     # 卡片在点击前消失：不打任何东西，回到循环重新看「好友发现」
@@ -884,6 +939,11 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
                 if result == 'LOSE':
                     defeats += 1
                     logger.warning(f'协战失败，连续失败 {defeats}/{cfg.max_consecutive_defeat} 次')
+                    # 失败结算后同样先判疲劳，再走「连续失败上限」的判定
+                    status, fatigue = self.check_fatigue(cfg, '失败结算后')
+                    if status == FATIGUE_OVER:
+                        return assists, self.fatigue_stop_reason(
+                            status, fatigue, cfg, '失败结算后'), 'FATIGUE'
                     if defeats >= cfg.max_consecutive_defeat:
                         return assists, (f'连续 {defeats} 次协战失败，可能是御魂或阵容配置有问题，'
                                          f'任务已停止，共成功协战 {assists} 只'), 'DEFEAT_LIMIT'
@@ -1003,12 +1063,14 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
             'FRIEND_MISSING': ('超鬼王协战·未找到指定好友', cfg.notify_friend_missing),
             'REINVITE_FAILED': ('超鬼王协战·连续邀请失败', cfg.notify_friend_missing),
             'DEFEAT_LIMIT': ('超鬼王协战·连续协战失败', cfg.notify_defeat_limit),
+            'FATIGUE': ('超鬼王协战·超过疲劳阈值', cfg.notify_fatigue_limit),
             'FAILED': ('超鬼王协战·任务完全失败', cfg.notify_task_failed),
             'END': ('超鬼王协战·任务汇总', cfg.notify_summary),
         }
         title, enabled = titles.get(kind, titles['END'])
         self.push(title, f'{reason}。本次共 {count} {unit}。', enabled=enabled)
 
-        success = count > 0 or kind == 'COMPLETE'
+        # 疲劳停止属于「按设定正常收工」，不是异常失败：下次调度照常运行
+        success = count > 0 or kind in ('COMPLETE', 'FATIGUE')
         self.set_next_run(task=TASK_NAME, success=success, finish=True)
         raise TaskEnd(TASK_NAME)
