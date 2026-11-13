@@ -783,10 +783,12 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
 
         # 星级筛选：勾玉在卡片左下角，与召唤界面的门票星级不是同一处 UI
         star = self.read_card_star_with_retry()
+        diag = getattr(self, '_card_star_diag', '')
+        diag_text = f'（逐格饱和度 {diag}）' if diag else ''
         if not star:
-            logger.warning('未能读出好友鬼王的星级，本轮不点挑战，等待下一只')
+            logger.warning(f'未能读出好友鬼王的星级{diag_text}，本轮不点挑战，等待下一只')
             return 'SKIP'
-        logger.info(f'识别到好友鬼王星级：{STAR_NAMES.get(star, star)}')
+        logger.info(f'识别到好友鬼王星级：{STAR_NAMES.get(star, star)}{diag_text}')
         if not self.star_allowed(star, cfg):
             logger.info(f'{STAR_NAMES.get(star, star)}不在协战「是否攻打」勾选范围内，'
                         f'本轮不点挑战，等待下一只鬼王')
@@ -806,6 +808,7 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
         wait_timer = None
         skip_timer = None
         unknown_streak = 0
+        skipped_card = None      # 因星级被跳过的卡片指纹，同一只鬼王不要反复点
         while 1:
             self.keep_alive()
             # 上一只鬼王打完后可能还在「击败奖励结算中」，期间不能挑战
@@ -837,6 +840,21 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
             if state == 'PRIVATE':
                 unknown_streak = 0
                 wait_timer = None
+                # 还是刚才那只「星级不在攻打范围」的鬼王：卡片不会自己消失，
+                # 但也不能再点它——连点 10 次会触发 device 的 GameTooManyClickError
+                # 把任务打断（2026-11-13 实机日志）。等它被换掉再重新判星级。
+                if self.same_card(skipped_card):
+                    if skip_timer is None:
+                        skip_timer = Timer(cfg.wait_timeout).start()
+                        logger.info(f'「好友发现」仍是刚才那只不在攻打范围的鬼王'
+                                    f'（头像差异 {self._card_diff:.1f}），不再重复点击，等它被换掉；'
+                                    f'每 {cfg.wait_interval} 秒检查一次，最长 {cfg.wait_timeout} 秒')
+                    if skip_timer.reached():
+                        return assists, (f'等待 {cfg.wait_timeout} 秒仍无选定星级的可协战鬼王，'
+                                         f'共成功协战 {assists} 只'), 'NO_ASSIST'
+                    sleep(cfg.wait_interval)
+                    continue
+                skipped_card = None
                 result = self.assist_once(cfg)
                 if result == 'WIN':
                     assists += 1
@@ -851,7 +869,9 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
                     continue
                 if result == 'SKIP':
                     # 星级不在「是否攻打」范围（或读不出星级）：不点挑战，等下一只。
-                    # 用独立计时器防止一直刷到同一只不想打的鬼王时无限空转
+                    # 记下这只鬼王的头像指纹，下一轮就不再重复点同一张卡片。
+                    self.screenshot()
+                    skipped_card = self.card_fingerprint()
                     if skip_timer is None:
                         skip_timer = Timer(cfg.wait_timeout).start()
                         logger.info(f'开始等待选定星级的鬼王，每 {cfg.wait_interval} 秒检查一次，'

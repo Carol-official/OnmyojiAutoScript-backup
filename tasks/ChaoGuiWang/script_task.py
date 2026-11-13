@@ -32,6 +32,7 @@ import random
 from time import sleep
 
 import cv2
+import numpy as np
 
 from module.base.timer import Timer
 from module.exception import TaskEnd
@@ -95,17 +96,37 @@ STAR_NAMES = {1: '1星', 2: '2星', 3: '3星', 4: '4星', 5: '5星', 6: '6星'}
 # ---------------- 发现卡片左下角的星级勾玉（协战筛选好友鬼王用）----------------
 # 与上面「召唤界面门票星级」是两套完全不同的界面：这里 6 个勾玉格位并排在
 # 卡片左下角，亮起的个数 = 星级；亮勾玉有橙色、紫色两种形态随机出现，未亮的
-# 是灰暗勾玉。参数由 9 张实机截图（1~6 星、橙/紫各形态）网格搜索得出，9/9 判对。
-CARD_STAR_X_START = 50          # 第 1 格左边界
-CARD_STAR_SPACING = 13          # 相邻格左边界间距
-CARD_STAR_WINDOW_W = 15         # 每格窗口宽（略大于间距，保证盖住整颗勾玉）
-CARD_STAR_WINDOW_H = 16         # 每格窗口高
-CARD_STAR_Y_BANDS = (440, 202)  # 好友发现卡片 / 自己发现卡片的星级行，相差 238px
-CARD_STAR_PIX_THRESHOLD = 40    # 每格亮像素数 >= 40 才算亮起（亮格最低 61、暗格最高 22）
-CARD_STAR_H_ORANGE = (3, 32)    # HSV 橙色，下界 3 排除用户标注的纯红框线(H≈0)
-CARD_STAR_H_PURPLE = (135, 178)
-CARD_STAR_S_MIN = 160           # 同时卡饱和度，排除紫/金卡片底纹与灰暗勾玉
-CARD_STAR_V_MIN = 120
+# 是灰暗勾玉。
+#
+# 2026-11-13 修正：原参数（x=50、间距 13、窗口 15×16、数「橙/紫像素个数」）在
+# 实机上把 4 星读成 6 星。原因是勾玉实际只有 8px 宽、间距 11px，从 x≈57 起，
+# 15px 宽的窗口会一路压到右侧的金色底纹和卡框——那些底色同样「橙且饱和」，
+# 于是第 5、6 格永远数出 60+ 个亮像素，永远 >= 阈值 40。
+#
+# 现在的判据不看「有几个亮像素」，而是「这一格的平均饱和度」：亮勾玉（橙/紫）
+# 平均 S 在 170~212，灰暗勾玉只有 23~53，中间没有任何重叠，比数像素稳得多。
+# 参数由 12 张实机截图（1~6 星，含橙/紫/自己发现卡片 + 现场 4 星故障图）扫描得出，
+# 阈值 110 两侧各留 60 以上余量，±1px 抖动也不误判。
+CARD_STAR_X_START = 58          # 第 1 颗勾玉左边界
+CARD_STAR_SPACING = 11          # 相邻勾玉左边界间距
+CARD_STAR_WINDOW_W = 6          # 只取勾玉本体中间 6px，避开两侧描边
+CARD_STAR_WINDOW_H = 13         # 窗口高
+CARD_STAR_Y = 443               # 「好友发现」卡片的星级行（协战只打好友的鬼王）
+CARD_STAR_S_THRESHOLD = 110     # 每格平均饱和度 >= 110 判亮（亮 170+，暗 55-）
+CARD_STAR_V_MIN = 110           # 求平均时跳过勾玉之间的暗缝像素
+# 曾经还多算一条「自己发现」卡片带（y=205）取两者较大值。但那条带上的卡片
+# 是另一套尺寸（勾玉从 x≈45 起、间距≈12），用好友卡片的格位去套会整片错位，
+# 反而可能把左侧「自己发现」的卡片当成好友卡片的星级——而协战模式下从来不
+# 需要它。所以只认好友卡片这一条带，读不到就按 SKIP 处理（不误打）。
+
+# ---------------- 「好友发现」卡片的身份指纹（避免对同一张卡反复点击）----------------
+# 星级不在攻打范围时主循环会继续等下一只鬼王，但卡片不会消失，于是每轮都会
+# 重新点一次同一张卡，连点 10 次就触发 device 的 GameTooManyClickError 把任务
+# 打断。用头像区域做指纹判断「还是不是同一只鬼王」：卡片上的「已分享 N 人」和
+# 「剩余时间 00:37:25」都会不停变化，所以只取头像（同一只鬼王像素级一致）。
+CARD_FINGERPRINT_ROI = (50, 376, 62, 56)   # x, y, w, h
+CARD_FINGERPRINT_SIZE = 12                  # 缩小到 12x12 再比较
+CARD_FINGERPRINT_DIFF = 6.0                 # 平均灰度差 <= 6 视为同一只鬼王（实测同图 0~1.5、不同图 11+）
 
 # ---------------- 点击「挑战」前的强追 / 普追切换 ----------------
 PURSUIT_SWITCH_VERIFY = 3       # 切换后最多复核几帧，确认开关真的翻过去了
@@ -443,32 +464,29 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
     def read_card_star(self) -> int:
         """读「发现卡片」左下角的星级（协战筛选好友鬼王用），返回 1~6，0 表示没读到。
 
-        与召唤界面的门票星级（read_demon_star）不是同一处 UI：这里是卡片左下角
-        并排的 6 个勾玉格位，亮起的个数 = 星级；亮勾玉有橙色和紫色两种形态
-        （随机出现），未亮的是灰暗勾玉。因此不能只看橙色，必须橙/紫一起判。
-        卡片有「好友发现」「自己发现」两种 y 位置（相差 238px），各算一遍取
-        亮像素总数更大的那一条带，避免星级行位置不同导致误读。
-        调用方应先确认卡片确实出现，否则其它界面上的紫色 UI 会给出伪星数。
+        判据是「每格的平均饱和度」，不是「亮像素个数」：亮勾玉（橙色/紫色两种
+        随机形态）平均 S 在 170 以上，灰暗勾玉只有 55 以下，中间没有重叠；
+        数像素的老办法会把格子边缘的金色底纹和卡片边框一起数进来——实机上
+        正是这样把 4 星读成了 6 星。求平均时跳过 V < CARD_STAR_V_MIN 的像素，
+        避开勾玉之间的暗缝。
+        只认「好友发现」卡片那一条带（y=443）：协战模式只打好友的鬼王，左侧
+        「自己发现」的卡片是另一套尺寸，套同一组格位会整片错位。
+        调用方应先确认卡片确实出现，否则其它界面上的高饱和 UI 会给出伪星数。
         """
         hsv = cv2.cvtColor(self.device.image, cv2.COLOR_RGB2HSV)
-        hue, sat, val = hsv[..., 0], hsv[..., 1], hsv[..., 2]
-        lo, hi = CARD_STAR_H_ORANGE
-        plo, phi = CARD_STAR_H_PURPLE
-        lit = ((((hue >= lo) & (hue <= hi)) | ((hue >= plo) & (hue <= phi)))
-               & (sat >= CARD_STAR_S_MIN) & (val >= CARD_STAR_V_MIN))
-        best_cells, best_total = None, -1
-        for y0 in CARD_STAR_Y_BANDS:
-            cells = [int(lit[y0:y0 + CARD_STAR_WINDOW_H,
-                             CARD_STAR_X_START + k * CARD_STAR_SPACING:
-                             CARD_STAR_X_START + k * CARD_STAR_SPACING + CARD_STAR_WINDOW_W].sum())
-                     for k in range(6)]
-            total = sum(cells)
-            if total > best_total:
-                best_cells, best_total = cells, total
-        self._card_star_diag = str(best_cells)
+        sat = hsv[..., 1].astype(np.int32)
+        val = hsv[..., 2]
+        cells = []
+        for k in range(6):
+            x = CARD_STAR_X_START + k * CARD_STAR_SPACING
+            window = (slice(CARD_STAR_Y, CARD_STAR_Y + CARD_STAR_WINDOW_H),
+                      slice(x, x + CARD_STAR_WINDOW_W))
+            keep = val[window] >= CARD_STAR_V_MIN
+            cells.append(int(sat[window][keep].mean()) if keep.any() else 0)
+        self._card_star_diag = ' '.join(str(c) for c in cells)
         star = 0
-        for count in best_cells:
-            if count < CARD_STAR_PIX_THRESHOLD:
+        for value in cells:
+            if value < CARD_STAR_S_THRESHOLD:
                 break
             star += 1
         return star
@@ -485,9 +503,40 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
             sleep(1)
         result = reads[-1][0] or 0
         if not result or len({star for star, _ in reads}) > 1:
-            detail = ' | '.join(f'{star}星（{diag}）' for star, diag in reads)
+            detail = ' | '.join(f'{star}星（逐格饱和度 {diag}）' for star, diag in reads)
             logger.warning(f'卡片星级识别异常：{detail}，本轮采用 {result} 星')
         return result
+
+    def card_fingerprint(self):
+        """「好友发现」卡片头像区域的粗指纹，用来判断还是不是同一只鬼王。
+
+        卡片上的「已分享 N 人」和「剩余时间 00:37:25」每秒都在变，所以只取头像：
+        同一只鬼王的头像像素级一致，换成另一只鬼王则明显不同。
+        用途：星级不在攻打范围时，别再反复去点同一张卡（连点 10 次会让 device
+        抛 GameTooManyClickError，把整个任务打断）。
+        """
+        x, y, w, h = CARD_FINGERPRINT_ROI
+        image = self.device.image
+        if image is None:
+            return None
+        crop = image[y:y + h, x:x + w]
+        if crop.size == 0:
+            return None
+        gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
+        small = cv2.resize(gray, (CARD_FINGERPRINT_SIZE, CARD_FINGERPRINT_SIZE),
+                           interpolation=cv2.INTER_AREA)
+        return small.astype(np.int32)
+
+    def same_card(self, fingerprint) -> bool:
+        """当前画面上的好友卡片是否就是 fingerprint 记下的那一只（平均灰度差够小）。"""
+        self._card_diff = -1.0
+        if fingerprint is None:
+            return False
+        current = self.card_fingerprint()
+        if current is None:
+            return False
+        self._card_diff = float(np.abs(current - fingerprint).mean())
+        return self._card_diff <= CARD_FINGERPRINT_DIFF
 
     def pursuit_state(self, shot: bool = True) -> str:
         """当前强追开关状态：'ON'（对号）/ 'OFF'（空心圆圈）/ 'UNKNOWN'。"""
