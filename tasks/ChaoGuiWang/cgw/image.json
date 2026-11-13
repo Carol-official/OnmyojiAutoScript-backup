@@ -74,10 +74,37 @@
   {
     "itemName": "cgw_current_score",
     "imageName": "cgw_current_score.png",
-    "roiFront": "47,81,130,38",
-    "roiBack": "20,60,200,90",
+    "roiFront": "62,86,90,26",
+    "roiBack": "45,70,120,52",
     "method": "Template matching",
     "threshold": 0.8,
-    "description": "战斗界面左上角「当前成绩」四字。只有识别到它才认为「准备」点击生效、战斗真正开始；不含下方会变化的成绩数字与用户标注红框"
+    "description": "战斗界面左上角「当前成绩」四字，90x26 紧裁。只有识别到它才认为「准备」点击生效、战斗真正开始；不含下方会变化的成绩数字与用户标注红框。三张实机截图分数 1.0000/0.9940/0.9535，其它界面最高 0.3722"
+  },
+  {
+    "itemName": "cgw_pursuit_on",
+    "imageName": "cgw_pursuit_on.png",
+    "roiFront": "1102,505,38,40",
+    "roiBack": "1080,490,80,70",
+    "method": "Template matching",
+    "threshold": 0.8,
+    "description": "「2.5倍伤害」左侧强追开关的蓝底白色对号圆圈（强追模式）；不含文字与红框线。强追样本 0.998~1.000，普追态 0.22~0.30"
+  },
+  {
+    "itemName": "cgw_pursuit_off",
+    "imageName": "cgw_pursuit_off.png",
+    "roiFront": "1106,508,32,32",
+    "roiBack": "1080,490,80,70",
+    "method": "Template matching",
+    "threshold": 0.8,
+    "description": "「2.5倍伤害」左侧强追开关的棕金空心圆圈（普追模式）；裁剪自无红框线的样本，避开红框。普追样本 0.9909~1.000，强追态 0.22~0.23"
+  },
+  {
+    "itemName": "cgw_reward_settling",
+    "imageName": "cgw_reward_settling.png",
+    "roiFront": "144,416,162,26",
+    "roiBack": "120,150,200,310",
+    "method": "Template matching",
+    "threshold": 0.8,
+    "description": "「击败奖励结算中」文字，出现期间不能召唤/挑战鬼王；大搜索区同时覆盖自己发现卡片(y≈170)与好友发现卡片(y≈410)。三张结算样本 0.8934/0.9295/1.0000，其它界面最高 0.3176"
   }
 ]

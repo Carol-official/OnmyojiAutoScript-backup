@@ -96,16 +96,23 @@ INVITE_FAIL_LIMIT = 3
 class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
     """超鬼王协战：邀请模式 / 协战模式。"""
 
-    # 本任务的星级开关叫 invite_star_N（界面显示「邀请N星鬼王」），
-    # 覆盖父类默认的 star_rank_N，两套配置互不干扰
+    # 三组按星级开关，覆盖父类的 cgw_ 前缀表：
+    # 协战模式用「是否攻打 / 是否强追」，邀请模式用「是否邀请」。
     STAR_FLAG_FIELDS = {
-        1: 'invite_star_1',
-        2: 'invite_star_2',
-        3: 'invite_star_3',
-        4: 'invite_star_4',
-        5: 'invite_star_5',
-        6: 'invite_star_6',
+        rank: f'cgwa_fight_star_{rank}' for rank in range(1, 7)
     }
+    PURSUIT_FLAG_FIELDS = {
+        rank: f'cgwa_pursuit_star_{rank}' for rank in range(1, 7)
+    }
+    INVITE_FLAG_FIELDS = {
+        rank: f'cgwa_invite_star_{rank}' for rank in range(1, 7)
+    }
+
+    def selected_invite_stars_text(self, cfg) -> str:
+        """把邀请模式已勾选的星级拼成短文本，用于启动日志。"""
+        flags = self.invite_flags(cfg)
+        picked = [f'{rank}星' for rank in sorted(flags) if flags[rank]]
+        return '、'.join(picked) if picked else '无'
 
     # 点击前随机等待的「已等待」豁免截止时间，避开父类自带的等待造成双重等待
     _skip_click_deadline = 0.0
@@ -612,6 +619,8 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
         timeouts = 0
         while 1:
             self.keep_alive()
+            # 上一只鬼王打完后可能还在「击败奖励结算中」，期间不能召唤
+            self.wait_reward_settle()
             logger.hr(f'超鬼王协战·邀请模式，已成功邀请 {invited} 只', 2)
             state = self.wait_self_demon()
 
@@ -634,7 +643,7 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
                     logger.info(f'识别到鬼王星级：{STAR_NAMES.get(star, star)}')
                 else:
                     logger.warning('未能识别鬼王星级，按当前勾选状态继续')
-                if star and not self.star_allowed(star, cfg):
+                if star and not self.invite_allowed(star, cfg):
                     return invited, (f'识别到 {STAR_NAMES.get(star, star)} 鬼王，'
                                      f'不在勾选的星级范围内，说明所选星级已打完，'
                                      f'共成功邀请 {invited} 只'), 'STAR_CLEARED'
@@ -742,14 +751,21 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
         return state
 
     def assist_once(self, cfg) -> str:
-        """点好友鬼王卡片 → 挑战 → 准备 → 结算，返回 'WIN' / 'LOSE' / 'GONE' / 'TIMEOUT'。
+        """点好友鬼王卡片 → 判星级 → 挑战 → 准备 → 结算。
+
+        返回 'WIN' / 'LOSE' / 'GONE' / 'SKIP' / 'TIMEOUT'。
 
         协战不召唤、也不打自己发现的鬼王：因此每一轮都必须先点「好友发现」的
         卡片把右侧面板切到好友的鬼王，再点「挑战」。不能像以前那样「挑战按钮
         已经可见就直接打」——自己发现的鬼王同样会显示挑战按钮，那样会把
         自己的鬼王打掉。
+
+        点「挑战」前先读卡片左下角的星级勾玉（橙/紫两种亮起形态都识别），
+        只打「是否攻打」勾选的星级；不在范围的鬼王不点挑战，返回 SKIP 让主循环
+        继续等下一只。星级读不出来也按 SKIP 处理，避免误打未选定的星级。
         """
         self.last_timeout_stage = ''
+        self.wait_reward_settle()
         self.screenshot()
         if not self.appear(self.I_CGWA_FRIEND_CARD):
             logger.info('点卡片前「好友发现」的鬼王卡片已消失（可能被别人打掉了），本轮放弃')
@@ -764,7 +780,19 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
                 self.last_timeout_stage = '打开好友鬼王卡片'
                 return 'TIMEOUT'
         logger.info('已选中「好友发现」的鬼王，开始协战（不召唤、不打自己的鬼王）')
-        return self.fight_once(cfg, need_summon=False)
+
+        # 星级筛选：勾玉在卡片左下角，与召唤界面的门票星级不是同一处 UI
+        star = self.read_card_star_with_retry()
+        if not star:
+            logger.warning('未能读出好友鬼王的星级，本轮不点挑战，等待下一只')
+            return 'SKIP'
+        logger.info(f'识别到好友鬼王星级：{STAR_NAMES.get(star, star)}')
+        if not self.star_allowed(star, cfg):
+            logger.info(f'{STAR_NAMES.get(star, star)}不在协战「是否攻打」勾选范围内，'
+                        f'本轮不点挑战，等待下一只鬼王')
+            return 'SKIP'
+        # star 会传给父类 fight_once，点挑战前按「是否强追」切好模式
+        return self.fight_once(cfg, need_summon=False, star=star)
 
     def run_assist(self, cfg) -> tuple:
         """协战模式主循环，返回 (协战成功次数, 结束原因, 结束类型)。
@@ -776,9 +804,12 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
         defeats = 0
         timeouts = 0
         wait_timer = None
+        skip_timer = None
         unknown_streak = 0
         while 1:
             self.keep_alive()
+            # 上一只鬼王打完后可能还在「击败奖励结算中」，期间不能挑战
+            self.wait_reward_settle()
             # 等待好友发现鬼王时每轮都要重新截帧，否则一直拿旧画面判断，
             # 好友鬼王出现了也看不见，会白等满 wait_timeout
             self.screenshot()
@@ -811,11 +842,24 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
                     assists += 1
                     defeats = 0
                     timeouts = 0
+                    skip_timer = None
                     logger.info(f'协战成功，累计 {assists} 只')
                     continue
                 if result == 'GONE':
                     # 卡片在点击前消失：不打任何东西，回到循环重新看「好友发现」
                     logger.info('好友鬼王已消失，重新检查「好友发现」区域')
+                    continue
+                if result == 'SKIP':
+                    # 星级不在「是否攻打」范围（或读不出星级）：不点挑战，等下一只。
+                    # 用独立计时器防止一直刷到同一只不想打的鬼王时无限空转
+                    if skip_timer is None:
+                        skip_timer = Timer(cfg.wait_timeout).start()
+                        logger.info(f'开始等待选定星级的鬼王，每 {cfg.wait_interval} 秒检查一次，'
+                                    f'最长 {cfg.wait_timeout} 秒')
+                    if skip_timer.reached():
+                        return assists, (f'等待 {cfg.wait_timeout} 秒仍无选定星级的可协战鬼王，'
+                                         f'共成功协战 {assists} 只'), 'NO_ASSIST'
+                    sleep(cfg.wait_interval)
                     continue
                 if result == 'LOSE':
                     defeats += 1
@@ -880,13 +924,14 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
         cfg = conf.chao_gui_wang_assist_config
         mode = cfg.mode
         logger.info(f'超鬼王协战启动，模式：{mode.value}'
-                    + (f'，邀请星级：{self.selected_stars_text(cfg)}'
-                       if mode == ChaoGuiWangAssistMode.INVITE else ''))
+                    + (f'，邀请星级：{self.selected_invite_stars_text(cfg)}'
+                       if mode == ChaoGuiWangAssistMode.INVITE
+                       else f'，协战星级：{self.selected_stars_text(cfg)}'))
 
-        # 邀请模式下六个星级开关都没勾时没有任何可分享的目标，不进游戏，直接退出
-        if mode == ChaoGuiWangAssistMode.INVITE and not any(self.star_flags(cfg).values()):
-            logger.error('模式为「邀请模式」但六个星级开关（邀请1星 ~ 邀请6星鬼王）'
-                         '一个都没勾选，没有可召唤分享的目标，任务直接结束。'
+        # 邀请模式下「是否邀请」六个开关都没勾时没有任何可分享的目标，不进游戏，直接退出
+        if mode == ChaoGuiWangAssistMode.INVITE and not any(self.invite_flags(cfg).values()):
+            logger.error('模式为「邀请模式」但六个「是否邀请」星级开关一个都没勾选，'
+                         '没有可召唤分享的目标，任务直接结束。'
                          '请至少勾选一个星级，或把模式改为「协战模式」。')
             self.set_next_run(task=TASK_NAME, success=False, finish=True)
             raise TaskEnd(TASK_NAME)

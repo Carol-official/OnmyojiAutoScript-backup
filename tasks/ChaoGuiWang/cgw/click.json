@@ -18,6 +18,12 @@
     "description": "战斗准备界面右下角准备鼓形按钮的中心区域"
   },
   {
+    "itemName": "cgw_pursuit_toggle",
+    "roiFront": "1108,510,28,28",
+    "roiBack": "1080,488,84,74",
+    "description": "「2.5倍伤害」左侧强追/普追切换开关的公共内部区域（对号圆圈与空心圆圈重合部分），点击可切换模式"
+  },
+  {
     "itemName": "cgw_settle_top",
     "roiFront": "27,67,1110,212",
     "roiBack": "27,67,1110,212",

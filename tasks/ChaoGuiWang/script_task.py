@@ -92,6 +92,30 @@ TICKET_GOLD_MIN = 100
 
 STAR_NAMES = {1: '1星', 2: '2星', 3: '3星', 4: '4星', 5: '5星', 6: '6星'}
 
+# ---------------- 发现卡片左下角的星级勾玉（协战筛选好友鬼王用）----------------
+# 与上面「召唤界面门票星级」是两套完全不同的界面：这里 6 个勾玉格位并排在
+# 卡片左下角，亮起的个数 = 星级；亮勾玉有橙色、紫色两种形态随机出现，未亮的
+# 是灰暗勾玉。参数由 9 张实机截图（1~6 星、橙/紫各形态）网格搜索得出，9/9 判对。
+CARD_STAR_X_START = 50          # 第 1 格左边界
+CARD_STAR_SPACING = 13          # 相邻格左边界间距
+CARD_STAR_WINDOW_W = 15         # 每格窗口宽（略大于间距，保证盖住整颗勾玉）
+CARD_STAR_WINDOW_H = 16         # 每格窗口高
+CARD_STAR_Y_BANDS = (440, 202)  # 好友发现卡片 / 自己发现卡片的星级行，相差 238px
+CARD_STAR_PIX_THRESHOLD = 40    # 每格亮像素数 >= 40 才算亮起（亮格最低 61、暗格最高 22）
+CARD_STAR_H_ORANGE = (3, 32)    # HSV 橙色，下界 3 排除用户标注的纯红框线(H≈0)
+CARD_STAR_H_PURPLE = (135, 178)
+CARD_STAR_S_MIN = 160           # 同时卡饱和度，排除紫/金卡片底纹与灰暗勾玉
+CARD_STAR_V_MIN = 120
+
+# ---------------- 点击「挑战」前的强追 / 普追切换 ----------------
+PURSUIT_SWITCH_VERIFY = 3       # 切换后最多复核几帧，确认开关真的翻过去了
+PURSUIT_SWITCH_INTERVAL = 0.6   # 复核帧间隔（秒）
+
+# ---------------- 打完鬼王后的「击败奖励结算中」等待 ----------------
+# 结算文字出现期间不能召唤或挑战，必须等它消失；给一个总上限防止界面卡住时死等
+REWARD_SETTLE_TIMEOUT = 180     # 最多等 3 分钟
+REWARD_SETTLE_INTERVAL = 1.0    # 检查间隔（秒）
+
 
 class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAssets):
     """超鬼王（祸主降临）任务。"""
@@ -363,20 +387,34 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
             logger.warning(f'星级识别异常：{detail}，本轮采用 {result} 星')
         return result
 
-    # 星级 → 配置字段名。协战任务继承本类，但它的星级开关叫 invite_star_N，会覆盖这张表。
+    # 星级 → 配置字段名。三张表分别对应「是否攻打 / 是否强追 / 是否邀请」，
+    # 协战任务继承本类后会覆盖成自己的 cgwa_ 前缀字段。
     STAR_FLAG_FIELDS = {
-        1: 'star_rank_1',
-        2: 'star_rank_2',
-        3: 'star_rank_3',
-        4: 'star_rank_4',
-        5: 'star_rank_5',
-        6: 'star_rank_6',
+        rank: f'cgw_fight_star_{rank}' for rank in range(1, 7)
+    }
+    PURSUIT_FLAG_FIELDS = {
+        rank: f'cgw_pursuit_star_{rank}' for rank in range(1, 7)
+    }
+    # 祸主降临没有邀请模式，父类给一个兜底；协战任务会覆盖成 cgwa_invite_star_N
+    INVITE_FLAG_FIELDS = {
+        rank: f'cgw_fight_star_{rank}' for rank in range(1, 7)
     }
 
-    def star_flags(self, cfg) -> dict:
-        """返回 {星级: 是否勾选}，字段名取自 STAR_FLAG_FIELDS。"""
+    def _flags_of(self, table: dict, cfg) -> dict:
         return {rank: bool(getattr(cfg, field, False))
-                for rank, field in self.STAR_FLAG_FIELDS.items()}
+                for rank, field in table.items()}
+
+    def star_flags(self, cfg) -> dict:
+        """返回 {星级: 是否攻打}。"""
+        return self._flags_of(self.STAR_FLAG_FIELDS, cfg)
+
+    def pursuit_flags(self, cfg) -> dict:
+        """返回 {星级: 是否强力追击}，默认全部关闭。"""
+        return self._flags_of(self.PURSUIT_FLAG_FIELDS, cfg)
+
+    def invite_flags(self, cfg) -> dict:
+        """返回 {星级: 是否邀请}，只有协战任务的邀请模式使用。"""
+        return self._flags_of(self.INVITE_FLAG_FIELDS, cfg)
 
     def selected_stars_text(self, cfg) -> str:
         """把已勾选的星级拼成「1星、3星」这样的短文本，用于日志。"""
@@ -385,16 +423,148 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
         return '、'.join(picked) if picked else '无'
 
     def star_allowed(self, star: int, cfg) -> bool:
-        """当前星级是否在勾选范围内。
-
-        六个开关都没勾时不做兜底：任务在主流程开头就直接结束，
-        这里一律返回 False，避免配置缺失时误打未勾选的星级。
-        """
+        """当前星级是否「攻打」。未勾选时一律不打，避免配置缺失时误打。"""
         return self.star_flags(cfg).get(star, False)
+
+    def pursuit_allowed(self, star: int, cfg) -> bool:
+        """当前星级是否切成强追模式；读不到星级时一律普追。"""
+        return bool(star) and self.pursuit_flags(cfg).get(star, False)
+
+    def invite_allowed(self, star: int, cfg) -> bool:
+        """当前星级是否「邀请」，协战邀请模式使用。"""
+        return self.invite_flags(cfg).get(star, False)
 
     # ------------------------------------------------------------------
     # 步骤 6~9：召唤、挑战、准备、战斗、结算
     # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # 发现卡片星级 / 强追模式 / 击败奖励结算中
+    # ------------------------------------------------------------------
+    def read_card_star(self) -> int:
+        """读「发现卡片」左下角的星级（协战筛选好友鬼王用），返回 1~6，0 表示没读到。
+
+        与召唤界面的门票星级（read_demon_star）不是同一处 UI：这里是卡片左下角
+        并排的 6 个勾玉格位，亮起的个数 = 星级；亮勾玉有橙色和紫色两种形态
+        （随机出现），未亮的是灰暗勾玉。因此不能只看橙色，必须橙/紫一起判。
+        卡片有「好友发现」「自己发现」两种 y 位置（相差 238px），各算一遍取
+        亮像素总数更大的那一条带，避免星级行位置不同导致误读。
+        调用方应先确认卡片确实出现，否则其它界面上的紫色 UI 会给出伪星数。
+        """
+        hsv = cv2.cvtColor(self.device.image, cv2.COLOR_RGB2HSV)
+        hue, sat, val = hsv[..., 0], hsv[..., 1], hsv[..., 2]
+        lo, hi = CARD_STAR_H_ORANGE
+        plo, phi = CARD_STAR_H_PURPLE
+        lit = ((((hue >= lo) & (hue <= hi)) | ((hue >= plo) & (hue <= phi)))
+               & (sat >= CARD_STAR_S_MIN) & (val >= CARD_STAR_V_MIN))
+        best_cells, best_total = None, -1
+        for y0 in CARD_STAR_Y_BANDS:
+            cells = [int(lit[y0:y0 + CARD_STAR_WINDOW_H,
+                             CARD_STAR_X_START + k * CARD_STAR_SPACING:
+                             CARD_STAR_X_START + k * CARD_STAR_SPACING + CARD_STAR_WINDOW_W].sum())
+                     for k in range(6)]
+            total = sum(cells)
+            if total > best_total:
+                best_cells, best_total = cells, total
+        self._card_star_diag = str(best_cells)
+        star = 0
+        for count in best_cells:
+            if count < CARD_STAR_PIX_THRESHOLD:
+                break
+            star += 1
+        return star
+
+    def read_card_star_with_retry(self, times: int = 3) -> int:
+        """卡片星级偶尔会被卡片弹入动画遮住，连续两帧读数一致才采信。"""
+        reads = []
+        for _ in range(times):
+            self.screenshot()
+            star = self.read_card_star()
+            reads.append((star, getattr(self, '_card_star_diag', '')))
+            if len(reads) >= 2 and star and star == reads[-2][0]:
+                return star
+            sleep(1)
+        result = reads[-1][0] or 0
+        if not result or len({star for star, _ in reads}) > 1:
+            detail = ' | '.join(f'{star}星（{diag}）' for star, diag in reads)
+            logger.warning(f'卡片星级识别异常：{detail}，本轮采用 {result} 星')
+        return result
+
+    def pursuit_state(self, shot: bool = True) -> str:
+        """当前强追开关状态：'ON'（对号）/ 'OFF'（空心圆圈）/ 'UNKNOWN'。"""
+        if shot:
+            self.screenshot()
+        on = self.appear(self.I_CGW_PURSUIT_ON)
+        off = self.appear(self.I_CGW_PURSUIT_OFF)
+        on_score = self.I_CGW_PURSUIT_ON.last_score
+        off_score = self.I_CGW_PURSUIT_OFF.last_score
+        if on and not off:
+            state = 'ON'
+        elif off and not on:
+            state = 'OFF'
+        elif on and off:
+            # 两个模板同时命中说明这一帧处在切换动画里，按分数高的判
+            state = 'ON' if on_score >= off_score else 'OFF'
+        else:
+            state = 'UNKNOWN'
+        logger.info(f'强追开关：对号 {on_score:.3f} / 圆圈 {off_score:.3f} → {state}')
+        return state
+
+    def ensure_pursuit_mode(self, star: int, cfg) -> None:
+        """点「挑战」前，按当前鬼王星级的「是否强追」开关切到对应模式。
+
+        没有全局总开关：每个星级的「是否强追」默认关闭，用户手动打开哪个星级，
+        哪个星级才切成强追；未勾的星级一律切回普追（避免上一只鬼王留下强追态）。
+        读不到星级时按普追处理。开关识别不到时只告警、不阻断流程，
+        避免因为一个可选功能让整轮战斗卡死。
+        """
+        want_on = self.pursuit_allowed(star, cfg)
+        target = 'ON' if want_on else 'OFF'
+        text = '强追' if want_on else '普追'
+        star_text = STAR_NAMES.get(star, '未知星级')
+        state = self.pursuit_state()
+        if state == target:
+            logger.info(f'{star_text}按设置为{text}模式，开关已是 {state}，无需切换')
+            return
+        if state == 'UNKNOWN':
+            logger.warning(f'未识别到强追/普追开关（{star_text}期望{text}），'
+                           f'本次不切换，按界面当前状态继续')
+            return
+        logger.info(f'{star_text}按设置为{text}模式，当前 {state}，点击切换开关')
+        self.wait_before_click('强力追击开关')
+        self.click(self.C_CGW_PURSUIT_TOGGLE)
+        self.device.click_record_clear()
+        for _ in range(PURSUIT_SWITCH_VERIFY):
+            sleep(PURSUIT_SWITCH_INTERVAL)
+            if self.pursuit_state() == target:
+                logger.info(f'强追开关已切换为 {target}（{text}）')
+                return
+        logger.warning(f'点击后仍未确认强追开关切到 {target}，按当前状态继续挑战')
+
+    def wait_reward_settle(self, timeout: int = REWARD_SETTLE_TIMEOUT) -> bool:
+        """若出现「击败奖励结算中」，等到它消失再继续召唤 / 挑战。
+
+        打完鬼王后有一段时间发奖励，期间不能召唤也不能攻打（点了也无效）。
+        文字会出现在「自己发现」或「好友发现」卡片右侧，两个位置由同一条
+        RuleImage 的大 roi_back 覆盖。等待期间持续重置设备卡死计时器，
+        避免长等待被误判成 GameStuckError；超过上限只告警并放行，不死等。
+        """
+        self.screenshot()
+        if not self.appear(self.I_CGW_REWARD_SETTLING):
+            return True
+        logger.info('检测到「击败奖励结算中」，等待结算结束后再继续任务')
+        timer = Timer(timeout).start()
+        while 1:
+            self.device.stuck_record_clear()
+            sleep(REWARD_SETTLE_INTERVAL)
+            self.screenshot()
+            if not self.appear(self.I_CGW_REWARD_SETTLING):
+                logger.info('「击败奖励结算中」已消失，继续任务')
+                return True
+            if timer.reached():
+                logger.warning(f'等待「击败奖励结算中」结束超时（{timeout} 秒），'
+                               f'继续尝试任务')
+                return False
+
     def settle_click_areas(self) -> list:
         """结算界面的可点击区域：用户白色框选的四大块，胜利与失败界面通用。
 
@@ -586,21 +756,27 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
         logger.warning('点击结算区域后仍停留在结算界面')
         return False
 
-    def fight_once(self, cfg, need_summon: bool) -> str:
-        """打完一次：召唤（可选）→ 挑战 → 准备 → 战斗 → 结算点击。
+    def fight_once(self, cfg, need_summon: bool, star: int = 0) -> str:
+        """打完一次：结算等待 → 召唤（可选）→ 强追切换 → 挑战 → 准备 → 战斗 → 结算点击。
 
         need_summon 为 False 表示挑战失败后重打同一只鬼王，此时不会再出现
         「召唤鬼王」按钮，直接点「挑战」即可。
+        star 是当前鬼王星级（读不到时为 0），用于点「挑战」前按星级开关切换
+        强追/普追模式；0 一律按普追处理。
         返回 'WIN' / 'LOSE' / 'TIMEOUT'；超时时把阶段写进 self.last_timeout_stage，
         交给外层做「逐个模板诊断界面 + 按流程恢复」。
         """
         self.last_timeout_stage = ''
+        # 打完上一只鬼王后可能还在「击败奖励结算中」，期间召唤/挑战都无效
+        self.wait_reward_settle()
         if need_summon:
             # 步骤 6：召唤鬼王。按钮出现后先随机等 1.5~3 秒再点
             if not self.click_stage(self.I_CGW_SUMMON, self.C_CGW_BOTTOM_BUTTON,
                                     timeout=20, delay=1.0, pre_delay=BEFORE_CLICK_DELAY):
                 self.last_timeout_stage = '召唤鬼王'
                 return 'TIMEOUT'
+        # 步骤 7 之前：按当前星级的「是否强追」开关切换强追/普追，默认普追
+        self.ensure_pursuit_mode(star, cfg)
         # 步骤 7：挑战。同样先随机等待，点完再多等一会儿，
         # 别在准备界面还没加载出来时就把点击打出去
         if not self.click_stage(self.I_CGW_CHALLENGE, self.C_CGW_BOTTOM_BUTTON,
@@ -803,12 +979,12 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
 
         logger.info(f'结束条件：{cfg.target_mode.value}'
                     + ('' if by_star else f'，目标 {cfg.kill_count} 只')
-                    + (f'，星级开关：{self.selected_stars_text(cfg)}' if by_star else ''))
+                    + (f'，攻打星级：{self.selected_stars_text(cfg)}' if by_star else ''))
 
-        # 星级模式下六个星级开关都没勾时没有任何可打目标，不切御魂、不进游戏，直接退出
+        # 星级模式下「是否攻打」六个开关都没勾时没有可打目标，不切御魂、不进游戏，直接退出
         if by_star and not any(self.star_flags(cfg).values()):
-            logger.error('结束条件为「按星级」但六个星级开关（打1星 ~ 打6星鬼王）'
-                         '一个都没勾选，没有可攻打的目标，任务直接结束。'
+            logger.error('结束条件为「按星级」但六个「是否攻打」星级开关一个都没勾选，'
+                         '没有可攻打的目标，任务直接结束。'
                          '请至少勾选一个星级，或把结束条件改为「按数量」。')
             self.set_next_run(task='ChaoGuiWang', success=False, finish=True)
             raise TaskEnd('ChaoGuiWang')
@@ -837,7 +1013,12 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
                 self.set_next_run(task='ChaoGuiWang', success=False, finish=True)
                 raise TaskEnd('ChaoGuiWang')
 
+        # 当前鬼王星级；挑战失败重打同一只时沿用上一轮读数，
+        # 这样「是否强追」的判定在重打时保持一致
+        star = 0
         while 1:
+            # 上一只鬼王打完后可能还在发奖励，结算期间不能召唤/挑战
+            self.wait_reward_settle()
             # 数量模式：达到设定只数即结束
             if not by_star and killed >= cfg.kill_count:
                 self.push('超鬼王·打完所设置数量的鬼王',
@@ -913,8 +1094,8 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
                 elif by_star:
                     logger.info('现成鬼王界面没有星级勾玉排，本轮不做星级筛选，直接挑战')
 
-            # 步骤 6~9：打一轮
-            result = self.fight_once(cfg, need_summon)
+            # 步骤 6~9：打一轮（star 用于挑战前按星级切换强追/普追）
+            result = self.fight_once(cfg, need_summon, star=star)
             if result == 'WIN':
                 killed += 1
                 defeats = 0

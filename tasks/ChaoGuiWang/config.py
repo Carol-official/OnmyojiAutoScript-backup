@@ -19,42 +19,64 @@ class ChaoGuiWangConfig(ConfigBase):
     # ---------------- 结束条件 ----------------
     target_mode: ChaoGuiWangTarget = Field(
         default=ChaoGuiWangTarget.COUNT,
-        description='结束条件：选「按数量」则打到设定只数结束，'
-                    '选「按星级」则按下面六个星级开关结束，未选中的那组设置自动失效')
+        description='结束条件：选「按数量」则打到设定只数结束；'
+                    '选「按星级」则按下面「是否攻打」开关判定所选星级是否打完，'
+                    '未选中的那组设置自动失效')
     # 数量模式
     kill_count: int = Field(default=30, ge=1, le=999,
                             description='需要击杀的超鬼王数量（按数量模式生效）')
 
-    # ---------------- 星级模式 ----------------
-    # 勾选哪些星级就只打哪些星级；识别到未勾选的星级说明该打的都打完了，任务结束。
-    # 六个星级各自独立开关；默认勾选 1~4 星，与拆分前的「打1至4星鬼王」行为一致。
-    star_rank_1: bool = Field(default=True,
-                              description='打 1 星鬼王（按星级模式生效）')
-    star_rank_2: bool = Field(default=True,
-                              description='打 2 星鬼王（按星级模式生效）')
-    star_rank_3: bool = Field(default=True,
-                              description='打 3 星鬼王（按星级模式生效）')
-    star_rank_4: bool = Field(default=True,
-                              description='打 4 星鬼王（按星级模式生效）')
-    star_rank_5: bool = Field(default=False,
-                              description='打 5 星鬼王（按星级模式生效）')
-    star_rank_6: bool = Field(default=False,
-                              description='打 6 星鬼王（按星级模式生效）')
+    # ---------------- 每个星级的处理开关 ----------------
+    # 「是否攻打」替代旧的 star_rank_N：识别到未勾选的星级就不打这只鬼王。
+    # 「是否强追」默认全部关闭（强力追击默认关闭，需手动打开）；只有勾了才会在
+    # 点「挑战」前把界面切成强追模式，未勾选的星级一律切回普追。
+    # 字段名带 cgw_ 前缀，与协战任务的开关在全局扁平 i18n 命名空间里互不冲突。
+    cgw_fight_star_1: bool = Field(default=True, description='是否攻打 1 星鬼王')
+    cgw_fight_star_2: bool = Field(default=True, description='是否攻打 2 星鬼王')
+    cgw_fight_star_3: bool = Field(default=True, description='是否攻打 3 星鬼王')
+    cgw_fight_star_4: bool = Field(default=True, description='是否攻打 4 星鬼王')
+    cgw_fight_star_5: bool = Field(default=False, description='是否攻打 5 星鬼王')
+    cgw_fight_star_6: bool = Field(default=False, description='是否攻打 6 星鬼王')
+    cgw_pursuit_star_1: bool = Field(default=False, description='1 星鬼王是否使用强力追击')
+    cgw_pursuit_star_2: bool = Field(default=False, description='2 星鬼王是否使用强力追击')
+    cgw_pursuit_star_3: bool = Field(default=False, description='3 星鬼王是否使用强力追击')
+    cgw_pursuit_star_4: bool = Field(default=False, description='4 星鬼王是否使用强力追击')
+    cgw_pursuit_star_5: bool = Field(default=False, description='5 星鬼王是否使用强力追击')
+    cgw_pursuit_star_6: bool = Field(default=False, description='6 星鬼王是否使用强力追击')
 
     @model_validator(mode='before')
     @classmethod
-    def migrate_star_rank_1_4(cls, data):
-        """旧配置只有「打1至4星鬼王」一个开关，加载时按它的值展开成 1~4 星四个开关。
+    def migrate_old_star_flags(cls, data):
+        """旧配置的星级开关迁移到 cgw_fight_star_1~6，避免用户已有设置丢失。
 
-        只在旧字段存在、且四个新字段一个都没写的情况下生效，不会覆盖用户的新设置。
+        兼容三代旧字段名：star_rank_1_4 / star_rank_5 / star_rank_6（最早的三开关）、
+        star_rank_1~6（拆分后的六开关）。只在新字段一个都没写时才迁移，
+        不会覆盖用户按新界面保存过的设置；迁移后把旧键删掉。
         """
         if not isinstance(data, dict):
             return data
-        new_keys = ('star_rank_1', 'star_rank_2', 'star_rank_3', 'star_rank_4')
-        if 'star_rank_1_4' in data and not any(key in data for key in new_keys):
-            old = bool(data['star_rank_1_4'])
-            for key in new_keys:
-                data[key] = old
+        fight = tuple(f'cgw_fight_star_{rank}' for rank in range(1, 7))
+        old_six = tuple(f'star_rank_{rank}' for rank in range(1, 7))
+        old_three = ('star_rank_1_4', 'star_rank_5', 'star_rank_6')
+        if not any(key in data for key in fight):
+            # star_rank_5 / star_rank_6 在两个时代里同名，必须先认「三开关时代」
+            # 独有的 star_rank_1_4，否则三开关配置会被六开关分支截获，
+            # 把明明关掉的 1~4 星按默认值恢复成开启
+            if 'star_rank_1_4' in data:
+                v = bool(data['star_rank_1_4'])
+                values = [v, v, v, v,
+                          bool(data.get('star_rank_5', False)),
+                          bool(data.get('star_rank_6', False))]
+            elif any(key in data for key in old_six):
+                values = [bool(data.get(key, rank <= 4))
+                          for rank, key in enumerate(old_six, 1)]
+            else:
+                values = None
+            if values is not None:
+                for key, value in zip(fight, values):
+                    data[key] = value
+        for key in old_six + old_three:
+            data.pop(key, None)
         return data
 
     # ---------------- 运行节奏与保护 ----------------

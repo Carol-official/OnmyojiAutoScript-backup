@@ -18,6 +18,9 @@ class ChaoGuiWangAssets:
 	C_CGW_BOTTOM_BUTTON = RuleClick(roi_front=(1100,560,155,140), roi_back=(1100,560,155,140), name="cgw_bottom_button")
 	# 战斗准备界面右下角「准备」鼓形按钮的中心区域 
 	C_CGW_PREPARE_CLICK = RuleClick(roi_front=(1145,545,70,70), roi_back=(1145,545,70,70), name="cgw_prepare_click")
+	# 「2.5倍伤害」左侧的强追/普追切换开关：对号圆圈与空心圆圈的公共内部区域，
+	# 点击它可在强追与普追之间切换（不含文字、不含用户标注的红框线）
+	C_CGW_PURSUIT_TOGGLE = RuleClick(roi_front=(1108,510,28,28), roi_back=(1080,488,84,74), name="cgw_pursuit_toggle")
 	# 结算界面白色框选的上方区域，右边界止于 1137 以避开右侧礼包/合成/积分按钮列
 	C_CGW_SETTLE_TOP = RuleClick(roi_front=(27,67,1110,212), roi_back=(27,67,1110,212), name="cgw_settle_top")
 	# 结算界面白色框选的左中区域
@@ -46,8 +49,15 @@ class ChaoGuiWangAssets:
 	# 限定时间内未击杀鬼王时的挑战失败结算界面，只取失败二字区域
 	I_CGW_SETTLE_FAIL = RuleImage(roi_front=(585,55,290,120), roi_back=(520,0,440,260), threshold=0.75, method="Template matching", file="./tasks/ChaoGuiWang/cgw/cgw_cgw_settle_fail.png")
 	# 战斗界面左上角「当前成绩」四字。只有识别到它才认为「准备」点击生效、战斗真正开始；
-	# 不含下方会变化的成绩数字，也不含用户标注用的红框线
-	I_CGW_CURRENT_SCORE = RuleImage(roi_front=(47,81,130,38), roi_back=(20,60,200,90), threshold=0.8, method="Template matching", file="./tasks/ChaoGuiWang/cgw/cgw_current_score.png")
+	# 90x26 紧裁只含四字与静态底纹，不含下方会变化的成绩数字与用户标注红框线
+	I_CGW_CURRENT_SCORE = RuleImage(roi_front=(62,86,90,26), roi_back=(45,70,120,52), threshold=0.8, method="Template matching", file="./tasks/ChaoGuiWang/cgw/cgw_current_score.png")
+	# 点击「挑战」前的强追开关：蓝底白色对号圆圈 = 强追模式
+	I_CGW_PURSUIT_ON = RuleImage(roi_front=(1102,505,38,40), roi_back=(1080,490,80,70), threshold=0.8, method="Template matching", file="./tasks/ChaoGuiWang/cgw/cgw_pursuit_on.png")
+	# 点击「挑战」前的强追开关：棕金空心圆圈（无对号）= 普追模式
+	I_CGW_PURSUIT_OFF = RuleImage(roi_front=(1106,508,32,32), roi_back=(1080,490,80,70), threshold=0.8, method="Template matching", file="./tasks/ChaoGuiWang/cgw/cgw_pursuit_off.png")
+	# 打完鬼王后卡片右侧的「击败奖励结算中」文字，出现期间不能召唤/挑战；
+	# 一条规则的大搜索区同时覆盖「自己发现」(y≈170) 与「好友发现」(y≈410) 两处位置
+	I_CGW_REWARD_SETTLING = RuleImage(roi_front=(144,416,162,26), roi_back=(120,150,200,310), threshold=0.8, method="Template matching", file="./tasks/ChaoGuiWang/cgw/cgw_reward_settling.png")
 
 
 	# Ocr Rule Assets

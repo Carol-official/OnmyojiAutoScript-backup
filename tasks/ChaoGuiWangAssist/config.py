@@ -27,43 +27,75 @@ class ChaoGuiWangAssistConfig(ConfigBase):
         description='运行模式：选「邀请模式」则召唤鬼王后分享给好友；'
                     '选「协战模式」则只打好友发现的非公开鬼王，未选中的那组设置自动失效')
 
-    # ---------------- 邀请模式：召唤与分享的星级 ----------------
-    # 勾选哪些星级就只召唤并分享哪些星级；识别到未勾选的星级说明该打的都打完了，任务结束。
-    # 用 invite_star_ 前缀（显示为「邀请N星鬼王」），与超鬼王任务的 star_rank_ 区分开，
-    # 避免两个任务共用同一组多语言条目。
-    invite_star_1: bool = Field(default=True,
-                                description='召唤并分享 1 星鬼王（邀请模式生效）')
-    invite_star_2: bool = Field(default=True,
-                                description='召唤并分享 2 星鬼王（邀请模式生效）')
-    invite_star_3: bool = Field(default=True,
-                                description='召唤并分享 3 星鬼王（邀请模式生效）')
-    invite_star_4: bool = Field(default=True,
-                                description='召唤并分享 4 星鬼王（邀请模式生效）')
-    invite_star_5: bool = Field(default=False,
-                                description='召唤并分享 5 星鬼王（邀请模式生效）')
-    invite_star_6: bool = Field(default=False,
-                                description='召唤并分享 6 星鬼王（邀请模式生效）')
+    # ---------------- 每个星级的处理开关 ----------------
+    # 协战模式：先判星级 →「是否攻打」决定是否打 →「是否强追」决定是否切强追。
+    # 邀请模式：「是否邀请」决定是否召唤并分享这只鬼王。
+    # 「是否强追」默认全部关闭（强力追击默认关闭，需手动打开）。
+    # 字段名带 cgwa_ 前缀，与祸主降临任务的开关在全局扁平 i18n 命名空间里互不冲突。
+    cgwa_fight_star_1: bool = Field(default=True, description='协战模式是否攻打 1 星鬼王')
+    cgwa_fight_star_2: bool = Field(default=True, description='协战模式是否攻打 2 星鬼王')
+    cgwa_fight_star_3: bool = Field(default=True, description='协战模式是否攻打 3 星鬼王')
+    cgwa_fight_star_4: bool = Field(default=True, description='协战模式是否攻打 4 星鬼王')
+    cgwa_fight_star_5: bool = Field(default=False, description='协战模式是否攻打 5 星鬼王')
+    cgwa_fight_star_6: bool = Field(default=False, description='协战模式是否攻打 6 星鬼王')
+    cgwa_pursuit_star_1: bool = Field(default=False, description='协战模式 1 星鬼王是否强力追击')
+    cgwa_pursuit_star_2: bool = Field(default=False, description='协战模式 2 星鬼王是否强力追击')
+    cgwa_pursuit_star_3: bool = Field(default=False, description='协战模式 3 星鬼王是否强力追击')
+    cgwa_pursuit_star_4: bool = Field(default=False, description='协战模式 4 星鬼王是否强力追击')
+    cgwa_pursuit_star_5: bool = Field(default=False, description='协战模式 5 星鬼王是否强力追击')
+    cgwa_pursuit_star_6: bool = Field(default=False, description='协战模式 6 星鬼王是否强力追击')
+    cgwa_invite_star_1: bool = Field(default=True, description='邀请模式是否邀请 1 星鬼王')
+    cgwa_invite_star_2: bool = Field(default=True, description='邀请模式是否邀请 2 星鬼王')
+    cgwa_invite_star_3: bool = Field(default=True, description='邀请模式是否邀请 3 星鬼王')
+    cgwa_invite_star_4: bool = Field(default=True, description='邀请模式是否邀请 4 星鬼王')
+    cgwa_invite_star_5: bool = Field(default=False, description='邀请模式是否邀请 5 星鬼王')
+    cgwa_invite_star_6: bool = Field(default=False, description='邀请模式是否邀请 6 星鬼王')
 
     @model_validator(mode='before')
     @classmethod
-    def migrate_star_rank_1_4(cls, data):
-        """旧配置用「1至4星 / 5星 / 6星」三个开关，加载时展开成 invite_star_1~6。
+    def migrate_old_star_flags(cls, data):
+        """旧 invite_star_1~6 / star_rank_1_4 等迁移到新的按星级开关。
 
-        只在旧字段存在、且 invite_star_ 一个都没写的情况下生效，不会覆盖用户的新设置。
+        旧配置只有一组「邀请N星鬼王」，新配置拆成「是否邀请 / 是否攻打」两组：
+        旧值先写入 cgwa_invite_star_1~6，若 cgwa_fight_star_1~6 一个都没写，
+        再用同一组值初始化协战模式的「是否攻打」，保持原来的打/不打范围。
+        只在新字段缺失时迁移，不覆盖用户按新界面保存过的设置；迁移后删掉旧键。
         """
         if not isinstance(data, dict):
             return data
-        new_keys = tuple(f'invite_star_{rank}' for rank in range(1, 7))
-        if any(key in data for key in new_keys):
-            return data
-        old_keys = ('star_rank_1_4', 'star_rank_5', 'star_rank_6')
-        if not any(key in data for key in old_keys):
-            return data
-        old_1_4 = bool(data.get('star_rank_1_4', True))
-        for rank in range(1, 5):
-            data[f'invite_star_{rank}'] = old_1_4
-        data['invite_star_5'] = bool(data.get('star_rank_5', False))
-        data['invite_star_6'] = bool(data.get('star_rank_6', False))
+        fight = tuple(f'cgwa_fight_star_{rank}' for rank in range(1, 7))
+        invite = tuple(f'cgwa_invite_star_{rank}' for rank in range(1, 7))
+        old_invite = tuple(f'invite_star_{rank}' for rank in range(1, 7))
+        old_six = tuple(f'star_rank_{rank}' for rank in range(1, 7))
+        old_three = ('star_rank_1_4', 'star_rank_5', 'star_rank_6')
+        default = [True, True, True, True, False, False]
+
+        values = None
+        if not any(key in data for key in invite):
+            # star_rank_5 / star_rank_6 在「三开关」与「六开关」两代配置里同名，
+            # 必须先认三开关独有的 star_rank_1_4，否则旧配置会被六开关分支截获
+            if any(key in data for key in old_invite):
+                values = [bool(data.get(key, default[rank - 1]))
+                          for rank, key in enumerate(old_invite, 1)]
+            elif 'star_rank_1_4' in data:
+                v = bool(data['star_rank_1_4'])
+                values = [v, v, v, v,
+                          bool(data.get('star_rank_5', False)),
+                          bool(data.get('star_rank_6', False))]
+            elif any(key in data for key in old_six):
+                values = [bool(data.get(key, rank <= 4))
+                          for rank, key in enumerate(old_six, 1)]
+            if values is not None:
+                for key, value in zip(invite, values):
+                    data[key] = value
+        if values is None:
+            values = [bool(data.get(key, default[rank - 1]))
+                      for rank, key in enumerate(invite, 1)]
+        if not any(key in data for key in fight):
+            for key, value in zip(fight, values):
+                data[key] = value
+        for key in old_invite + old_six + old_three:
+            data.pop(key, None)
         return data
     share_friend_name: str = Field(default='',
                                    description='分享目标好友名，须与分享弹窗中的名字完全一致。'
