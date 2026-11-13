@@ -32,24 +32,30 @@ class ChaoGuiWangAssistConfig(ConfigBase):
     # 邀请模式：「是否邀请」决定是否召唤并分享这只鬼王。
     # 「是否强追」默认全部关闭（强力追击默认关闭，需手动打开）。
     # 字段名带 cgwa_ 前缀，与祸主降临任务的开关在全局扁平 i18n 命名空间里互不冲突。
-    cgwa_fight_star_1: bool = Field(default=True, description='协战模式是否攻打 1 星鬼王')
-    cgwa_fight_star_2: bool = Field(default=True, description='协战模式是否攻打 2 星鬼王')
-    cgwa_fight_star_3: bool = Field(default=True, description='协战模式是否攻打 3 星鬼王')
-    cgwa_fight_star_4: bool = Field(default=True, description='协战模式是否攻打 4 星鬼王')
-    cgwa_fight_star_5: bool = Field(default=False, description='协战模式是否攻打 5 星鬼王')
-    cgwa_fight_star_6: bool = Field(default=False, description='协战模式是否攻打 6 星鬼王')
-    cgwa_pursuit_star_1: bool = Field(default=False, description='协战模式 1 星鬼王是否强力追击')
-    cgwa_pursuit_star_2: bool = Field(default=False, description='协战模式 2 星鬼王是否强力追击')
-    cgwa_pursuit_star_3: bool = Field(default=False, description='协战模式 3 星鬼王是否强力追击')
-    cgwa_pursuit_star_4: bool = Field(default=False, description='协战模式 4 星鬼王是否强力追击')
-    cgwa_pursuit_star_5: bool = Field(default=False, description='协战模式 5 星鬼王是否强力追击')
-    cgwa_pursuit_star_6: bool = Field(default=False, description='协战模式 6 星鬼王是否强力追击')
-    cgwa_invite_star_1: bool = Field(default=True, description='邀请模式是否邀请 1 星鬼王')
-    cgwa_invite_star_2: bool = Field(default=True, description='邀请模式是否邀请 2 星鬼王')
-    cgwa_invite_star_3: bool = Field(default=True, description='邀请模式是否邀请 3 星鬼王')
-    cgwa_invite_star_4: bool = Field(default=True, description='邀请模式是否邀请 4 星鬼王')
-    cgwa_invite_star_5: bool = Field(default=False, description='邀请模式是否邀请 5 星鬼王')
-    cgwa_invite_star_6: bool = Field(default=False, description='邀请模式是否邀请 6 星鬼王')
+    #
+    # 布局：客户端（oasx）按字段声明顺序逐条铺开，所以这里「按星级分组」排列，
+    # 同一星级的攻打/邀请/强追连在一起，18 条能一屏看全。
+    # 这里刻意不写 description —— oasx 会把 description 渲染成标题下面的一行说明，
+    # 每条开关因此变成两行高，18 条要占两屏多；去掉后每条只剩一行短标题。
+    # 显示用的短标题在 assets/i18n/zh-CN.json（键名 = 字段名），形如「1星·攻打」。
+    cgwa_fight_star_1: bool = True
+    cgwa_invite_star_1: bool = True
+    cgwa_pursuit_star_1: bool = False
+    cgwa_fight_star_2: bool = True
+    cgwa_invite_star_2: bool = True
+    cgwa_pursuit_star_2: bool = False
+    cgwa_fight_star_3: bool = True
+    cgwa_invite_star_3: bool = True
+    cgwa_pursuit_star_3: bool = False
+    cgwa_fight_star_4: bool = True
+    cgwa_invite_star_4: bool = True
+    cgwa_pursuit_star_4: bool = False
+    cgwa_fight_star_5: bool = False
+    cgwa_invite_star_5: bool = False
+    cgwa_pursuit_star_5: bool = False
+    cgwa_fight_star_6: bool = False
+    cgwa_invite_star_6: bool = False
+    cgwa_pursuit_star_6: bool = False
 
     @model_validator(mode='before')
     @classmethod

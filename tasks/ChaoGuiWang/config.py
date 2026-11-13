@@ -31,18 +31,24 @@ class ChaoGuiWangConfig(ConfigBase):
     # 「是否强追」默认全部关闭（强力追击默认关闭，需手动打开）；只有勾了才会在
     # 点「挑战」前把界面切成强追模式，未勾选的星级一律切回普追。
     # 字段名带 cgw_ 前缀，与协战任务的开关在全局扁平 i18n 命名空间里互不冲突。
-    cgw_fight_star_1: bool = Field(default=True, description='是否攻打 1 星鬼王')
-    cgw_fight_star_2: bool = Field(default=True, description='是否攻打 2 星鬼王')
-    cgw_fight_star_3: bool = Field(default=True, description='是否攻打 3 星鬼王')
-    cgw_fight_star_4: bool = Field(default=True, description='是否攻打 4 星鬼王')
-    cgw_fight_star_5: bool = Field(default=False, description='是否攻打 5 星鬼王')
-    cgw_fight_star_6: bool = Field(default=False, description='是否攻打 6 星鬼王')
-    cgw_pursuit_star_1: bool = Field(default=False, description='1 星鬼王是否使用强力追击')
-    cgw_pursuit_star_2: bool = Field(default=False, description='2 星鬼王是否使用强力追击')
-    cgw_pursuit_star_3: bool = Field(default=False, description='3 星鬼王是否使用强力追击')
-    cgw_pursuit_star_4: bool = Field(default=False, description='4 星鬼王是否使用强力追击')
-    cgw_pursuit_star_5: bool = Field(default=False, description='5 星鬼王是否使用强力追击')
-    cgw_pursuit_star_6: bool = Field(default=False, description='6 星鬼王是否使用强力追击')
+    #
+    # 布局：客户端（oasx）按字段声明顺序逐条铺开，所以这里「按星级分组」排列，
+    # 同一星级的攻打/强追连在一起，一屏能看全。
+    # 这里刻意不写 description —— oasx 会把 description 渲染成标题下面的一行说明，
+    # 每条开关因此变成两行高，12 条就撑满两屏；去掉后每条只剩一行短标题。
+    # 显示用的短标题在 assets/i18n/zh-CN.json（键名 = 字段名），形如「1星·攻打」。
+    cgw_fight_star_1: bool = True
+    cgw_pursuit_star_1: bool = False
+    cgw_fight_star_2: bool = True
+    cgw_pursuit_star_2: bool = False
+    cgw_fight_star_3: bool = True
+    cgw_pursuit_star_3: bool = False
+    cgw_fight_star_4: bool = True
+    cgw_pursuit_star_4: bool = False
+    cgw_fight_star_5: bool = False
+    cgw_pursuit_star_5: bool = False
+    cgw_fight_star_6: bool = False
+    cgw_pursuit_star_6: bool = False
 
     @model_validator(mode='before')
     @classmethod
