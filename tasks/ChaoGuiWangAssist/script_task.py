@@ -43,8 +43,8 @@
        - 存在鬼王卡片且没有「已公开」印章 → 非公开鬼王：先点这张卡片把自己
          的选中目标切到好友的鬼王，再点挑战 → 准备 → 结算，
          出现一次胜利结算即协战成功一只
-       - 每轮把「卡片 / 已公开印章×2 / 空位鬼面」四个模板分数与最终结论写进日志，
-         公开判断不再静默；三种特征都读不到时先按 1 秒间隔重试 3 轮才做界面诊断
+       - 每轮输出「好友发现区」判定结果，不打印四个模板分数；公开判断不再静默；
+         三种特征都读不到时先按 1 秒间隔重试 3 轮才做界面诊断
     6. 每次胜利结算或失败结算后，都先读一次疲劳度再决定是否继续：
        超过阈值即推送并结束任务（失败结算的疲劳判断在「连续失败上限」之前）
 
@@ -674,14 +674,11 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
                     return invited, (f'已有召唤鬼王的卡片复核失败，为避免误邀请，'
                                      f'任务结束，共成功邀请 {invited} 只'), 'FAILED'
                 star = self.read_self_card_star_with_retry()
-                diag = getattr(self, '_card_star_diag', '')
                 if not star:
-                    logger.error(f'已有召唤鬼王星级识别失败（逐格饱和度 {diag}）')
-                    return invited, (f'已有召唤鬼王星级识别失败（逐格饱和度 {diag}），'
-                                     f'为避免误邀请未选定星级，任务结束，'
-                                     f'共成功邀请 {invited} 只'), 'FAILED'
-                logger.info(f'识别到已召唤鬼王星级：{STAR_NAMES.get(star, star)}'
-                            f'（逐格饱和度 {diag}）')
+                    logger.error('已有召唤鬼王星级识别失败')
+                    return invited, (f'已有召唤鬼王星级识别失败，为避免误邀请未选定星级，'
+                                     f'任务结束，共成功邀请 {invited} 只'), 'FAILED'
+                logger.info(f'识别到已召唤鬼王星级：{STAR_NAMES.get(star, star)}')
                 if not self.invite_allowed(star, cfg):
                     self.push('超鬼王协战·跳过未勾选星级鬼王',
                               f'已有召唤鬼王为{STAR_NAMES.get(star, star)}，'
@@ -796,7 +793,7 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
                 f'为避免继续消耗疲劳，任务停止')
 
     def friend_demon_state(self) -> str:
-        """「好友发现」区域的状态，并把四个模板的分数与最终结论写进日志。
+        """识别「好友发现」区域的状态，日志只输出最终结论，不打印模板分数。
 
         'MASK'    只有鬼面空位图标 → 当前没有可协战的好友鬼王；
         'PUBLIC'  「已公开」印章命中（两个模板任一命中）→ 按需求忽略；
@@ -806,21 +803,16 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
         判定顺序是「已公开印章 → 卡片 → 空位鬼面」：
         1. 印章优先于空位，避免某帧卡片与空位同时可见时跳过公开检查；
         2. 卡片标签没读到但印章在，仍保守判 PUBLIC，绝不会把已公开鬼王打掉；
-        3. 每轮都打印四个模板的匹配分数，判定为「非公开」时也有据可查
-           （旧实现只在命中 PUBLIC 时打日志，PRIVATE 是静默的，无法确认
-           公开判断到底有没有执行、印章有没有漏检）。
+        3. 日志只输出最终判定结果，不打印四个模板的匹配分数与命中标记；
+           公开判断每轮都执行，PRIVATE 也会留一行结果，便于确认判定已运行。
 
         「好友发现」的卡片上没有「集结」印章（那是「自己发现」卡片才有的），
         所以卡片存在与否用卡片固定的「剩余时间」标签判定。
         """
         card = self.appear(self.I_CGWA_FRIEND_CARD)
-        card_score = self.I_CGWA_FRIEND_CARD.last_score
         public_old = self.appear(self.I_CGWA_PUBLIC)
-        public_old_score = self.I_CGWA_PUBLIC.last_score
         public_real = self.appear(self.I_CGWA_PUBLIC_REAL)
-        public_real_score = self.I_CGWA_PUBLIC_REAL.last_score
         mask = self.appear(self.I_CGWA_FRIEND_MASK)
-        mask_score = self.I_CGWA_FRIEND_MASK.last_score
         public = public_old or public_real
 
         if public:
@@ -836,16 +828,7 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
             state = 'UNKNOWN'
             reason = '三种特征均未命中，界面过渡或异常'
 
-        def mark(hit: bool) -> str:
-            return '√' if hit else '×'
-
-        logger.info(
-            f'好友发现区判定：卡片 {card_score:.3f}{mark(card)} | '
-            f'已公开印章[旧 {public_old_score:.3f}{mark(public_old)} '
-            f'实机 {public_real_score:.3f}{mark(public_real)}] | '
-            f'空位鬼面 {mask_score:.3f}{mark(mask)} '
-            f'→ {state}（{reason}）'
-        )
+        logger.info(f'好友发现区判定：{state}（{reason}）')
         return state
 
     def assist_once(self, cfg) -> str:
@@ -881,12 +864,10 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
 
         # 星级筛选：勾玉在卡片左下角，与召唤界面的门票星级不是同一处 UI
         star = self.read_card_star_with_retry()
-        diag = getattr(self, '_card_star_diag', '')
-        diag_text = f'（逐格饱和度 {diag}）' if diag else ''
         if not star:
-            logger.warning(f'未能读出好友鬼王的星级{diag_text}，本轮不点挑战，等待下一只')
+            logger.warning('未能读出好友鬼王的星级，本轮不点挑战，等待下一只')
             return 'SKIP'
-        logger.info(f'识别到好友鬼王星级：{STAR_NAMES.get(star, star)}{diag_text}')
+        logger.info(f'识别到好友鬼王星级：{STAR_NAMES.get(star, star)}')
         if not self.star_allowed(star, cfg):
             logger.info(f'{STAR_NAMES.get(star, star)}不在协战「是否攻打」勾选范围内，'
                         f'本轮不点挑战，等待下一只鬼王')

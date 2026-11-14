@@ -26,7 +26,8 @@
 在「脚本设置 → 错误」里开启推送并配置 provider: pushplus 即为 PushPlus 推送。
 以上六类推送各有独立开关，另有 notify_enable 总开关，每条推送都带已击杀数量。
 
-任务卡住/超时时会把所有界面模板逐个匹配一遍并打印分数，判定当前停在哪个界面，
+任务卡住/超时时会把所有界面模板逐个匹配一遍，日志只输出判定出的界面与恢复动作，
+不打印逐个模板的匹配分数；
 再按「结算 → 战斗 → 准备 → 挑战 → 主界面 → 活动 → 庭院」的流程把游戏推回第 3 步。
 """
 import random
@@ -367,7 +368,7 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
         判据用「橙色像素的横向跨度」而不是像素面积：勾玉按 8px 固定间距排布，
         跨度只取决于点亮了几颗，和光晕强弱无关；面积会被图标弹出时的辉光
         整体抬高（实机曾把 4 星读成 5 星），因此完全不参与判定。
-        本帧的跨度与像素量记入 _star_diag，只在识别异常时用于诊断日志。
+        本帧的跨度与像素量记入 _star_diag，留给离线排障，不写进运行日志。
         """
         hsv = self._hsv(STAR_ROW_ROI)
         orange = ((hsv[..., 0] >= 5) & (hsv[..., 0] <= 28) &
@@ -395,15 +396,15 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
                 (hsv[..., 1] >= 80) & (hsv[..., 2] >= 95))
         pixels = int(gold.sum())
         if pixels >= TICKET_GOLD_MIN:
-            logger.info(f'识别到金色鬼面图标（金色像素 {pixels}），门票已打完')
+            logger.info('识别到金色鬼面图标，门票已打完')
             return True
         return False
 
     def read_star_with_retry(self, times: int = 3) -> int:
         """星级图标偶尔会被界面动画遮住，连续识别到同一个结果才采信。
 
-        正常情况不输出诊断信息；只有三次读数不一致、或最终仍识别不到星级时，
-        才打一行包含每帧跨度 / 橙色像素量的记录，便于事后排障。
+        运行日志只输出最终星级；三次读数不一致或识别不到时只提示异常，
+        不打印每帧跨度 / 橙色像素量等识别过程数据。
         """
         reads = []
         for _ in range(times):
@@ -415,8 +416,7 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
             sleep(1)
         result = reads[-1][0] or 0
         if not result or len({star for star, _ in reads}) > 1:
-            detail = ' | '.join(f'{star}星（{diag}）' for star, diag in reads)
-            logger.warning(f'星级识别异常：{detail}，本轮采用 {result} 星')
+            logger.warning(f'星级识别异常，本轮采用 {result} 星')
         return result
 
     # 星级 → 配置字段名。三张表分别对应「是否攻打 / 是否强追 / 是否邀请」，
@@ -520,8 +520,7 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
             sleep(1)
         result = reads[-1][0] or 0
         if not result or len({star for star, _ in reads}) > 1:
-            detail = ' | '.join(f'{star}星（逐格饱和度 {diag}）' for star, diag in reads)
-            logger.warning(f'卡片星级识别异常：{detail}，本轮采用 {result} 星')
+            logger.warning(f'卡片星级识别异常，本轮采用 {result} 星')
         return result
 
     def card_fingerprint(self):
@@ -572,7 +571,7 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
             state = 'ON' if on_score >= off_score else 'OFF'
         else:
             state = 'UNKNOWN'
-        logger.info(f'强追开关：对号 {on_score:.3f} / 圆圈 {off_score:.3f} → {state}')
+        logger.info(f'强追开关：{state}')
         return state
 
     def ensure_pursuit_mode(self, star: int, cfg) -> None:
@@ -905,7 +904,8 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
         """把所有模板逐个在当前截图上匹配一遍，返回 模板名 -> (是否命中, 分数)。
 
         这里刻意不在第一个命中处短路：超时往往是「某个模板分数卡在阈值附近」
-        造成的，把全部分数打进日志才能一眼看出游戏究竟停在哪一帧。
+        造成的，全量匹配才能按流程优先级准确判定停在哪一帧；分数只留给离线
+        排障，不写进运行日志。
         """
         result = {}
         for _, _, images in self.page_templates():
@@ -928,12 +928,10 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
         return 'UNKNOWN'
 
     def log_page_diagnosis(self, stage: str) -> str:
-        """超时时重新截图，逐个匹配模板并输出分数，返回界面标识。"""
+        """超时时重新截图判定界面，日志只输出判定结果，不打印逐个模板分数。"""
         self.screenshot()
         scores = self.match_templates()
         logger.hr(f'超时界面诊断：{stage}', 2)
-        for name, (hit, score) in scores.items():
-            logger.info(f'  模板 {name}: 分数 {score:.4f} → {"命中" if hit else "未命中"}')
         return self.detect_current_page(scores)
 
     def diagnose_and_recover(self, stage: str) -> bool:
