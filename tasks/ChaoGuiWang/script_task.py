@@ -625,7 +625,12 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
         'SUMMONED'  已在弹窗内点「立即召唤」完成召唤，调用方跳过原召唤；
         'EXHAUSTED' 列表里没有顺位范围内且允许使用的星级票；
         'FAILED'    弹窗/星级识别失败，调用方沿用原召唤流程（不误结束、不误打）。
+
+        本轮实际要召唤的星级会写进 self.ticket_order_star（未确定为 0）。
+        换票前从主界面读到的是旧票的星级，调用方必须用 resolved_star()
+        覆盖后再做星级拦截与强追/普追判定。
         """
+        self.ticket_order_star = 0
         order = self.parse_ticket_order(order_text)
         if not order:
             return 'UNCHANGED'
@@ -635,6 +640,7 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
 
         current = self.read_star_with_retry()
         if current == targets[0]:
+            self.ticket_order_star = current
             return 'UNCHANGED'
 
         self.device.click(TICKET_LIST_BUTTON[0], TICKET_LIST_BUTTON[1],
@@ -665,6 +671,7 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
 
         # 游戏已自动补位到当前最优星级时，不必重复点选，关弹窗走原流程即可
         if current == pick[1]:
+            self.ticket_order_star = current
             self.close_ticket_popup()
             return 'UNCHANGED'
 
@@ -683,11 +690,24 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
         sleep(1.5)
         self.screenshot()
         if self.ticket_popup_open():
-            # 「立即召唤」没生效：票已选中，关弹窗让原流程点主界面「召唤鬼王」
+            # 「立即召唤」没生效：票已选中，关弹窗让原流程点主界面「召唤鬼王」；
+            # 原流程召唤用的仍是这张选中的票，星级要按它算
+            self.ticket_order_star = pick[1]
             self.close_ticket_popup()
             return 'UNCHANGED'
+        self.ticket_order_star = pick[1]
         logger.info(f'门票顺位：已切换到 {STAR_NAMES.get(pick[1], pick[1])}并完成召唤')
         return 'SUMMONED'
+
+    def resolved_star(self, star: int) -> int:
+        """门票顺位换票后，返回本轮实际要打的星级。
+
+        ensure_ticket_order() 把选中的票星级写进 ticket_order_star；换票前
+        从主界面读到的 star 属于旧票，不能直接拿去判强追/普追或是否邀请。
+        未启用顺位、识别失败时 ticket_order_star 为 0，保持原读数不变。
+        """
+        picked = getattr(self, 'ticket_order_star', 0)
+        return picked if picked else star
 
     # ------------------------------------------------------------------
     # 疲劳恢复等待
@@ -1417,22 +1437,10 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
                 star = 0
                 if demon_state == 'READY':
                     star = self.read_star_with_retry()
-                    if star:
-                        logger.info(f'识别到鬼王星级：{STAR_NAMES.get(star, star)}')
-                    else:
+                    if not star:
                         logger.warning('未能识别鬼王星级，按允许处理继续战斗')
-                    if by_star and star and not self.star_allowed(star, cfg):
-                        self.push('超鬼王·打完所选星级鬼王',
-                                  f'识别到 {STAR_NAMES.get(star, star)} 鬼王，不在勾选的星级范围内，'
-                                  f'说明所选星级已打完，任务结束。'
-                                  f'已击杀 {killed} 只。',
-                                  enabled=cfg.notify_star_cleared)
-                        break
-                elif by_star:
-                    logger.info('现成鬼王界面没有星级勾玉排，本轮不做星级筛选，直接挑战')
 
-                # 门票顺位：只有「可召唤」界面才换得动门票；现成鬼王已召唤，不处理
-                if demon_state == 'READY':
+                    # 门票顺位：只有「可召唤」界面才换得动门票
                     ticket_result = self.ensure_ticket_order(
                         cfg, lambda rank: self.star_allowed(rank, cfg),
                         getattr(cfg, 'ticket_order', ''))
@@ -1445,6 +1453,21 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
                     if ticket_result == 'SUMMONED':
                         # 弹窗内「立即召唤」已完成召唤，fight_once 跳过再次点召唤
                         need_summon = False
+
+                    # 换票后星级可能已变：星级拦截与强追/普追都必须用最终星级；
+                    # 换票前读到的旧票星级只在顺位未启用或识别失败时沿用
+                    star = self.resolved_star(star)
+                    if star:
+                        logger.info(f'识别到鬼王星级：{STAR_NAMES.get(star, star)}')
+                    if by_star and star and not self.star_allowed(star, cfg):
+                        self.push('超鬼王·打完所选星级鬼王',
+                                  f'识别到 {STAR_NAMES.get(star, star)} 鬼王，不在勾选的星级范围内，'
+                                  f'说明所选星级已打完，任务结束。'
+                                  f'已击杀 {killed} 只。',
+                                  enabled=cfg.notify_star_cleared)
+                        break
+                elif by_star:
+                    logger.info('现成鬼王界面没有星级勾玉排，本轮不做星级筛选，直接挑战')
 
             # 步骤 6~9：打一轮（star 用于挑战前按星级切换强追/普追）
             result = self.fight_once(cfg, need_summon, star=star)

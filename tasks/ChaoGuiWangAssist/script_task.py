@@ -707,14 +707,8 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
 
             if state == 'READY':
                 star = self.read_star_with_retry()
-                if star:
-                    logger.info(f'识别到鬼王星级：{STAR_NAMES.get(star, star)}')
-                else:
+                if not star:
                     logger.warning('未能识别鬼王星级，按当前勾选状态继续')
-                if star and not self.invite_allowed(star, cfg):
-                    return invited, (f'识别到 {STAR_NAMES.get(star, star)} 鬼王，'
-                                     f'不在勾选的星级范围内，说明所选星级已打完，'
-                                     f'共成功邀请 {invited} 只'), 'STAR_CLEARED'
 
                 # 门票顺位：只有可召唤界面换得动门票；已在弹窗点「立即召唤」则跳过原召唤
                 ticket_result = self.ensure_ticket_order(
@@ -722,6 +716,16 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
                     getattr(cfg, 'ticket_order', ''))
                 if ticket_result == 'EXHAUSTED':
                     return invited, (f'门票列表里已没有顺位范围内且允许邀请的星级门票，'
+                                     f'共成功邀请 {invited} 只'), 'STAR_CLEARED'
+
+                # 换票后星级可能已变，是否邀请必须用最终星级判定；
+                # 换票前读到的旧票星级只在顺位未启用或识别失败时沿用
+                star = self.resolved_star(star)
+                if star:
+                    logger.info(f'识别到鬼王星级：{STAR_NAMES.get(star, star)}')
+                if star and not self.invite_allowed(star, cfg):
+                    return invited, (f'识别到 {STAR_NAMES.get(star, star)} 鬼王，'
+                                     f'不在勾选的星级范围内，说明所选星级已打完，'
                                      f'共成功邀请 {invited} 只'), 'STAR_CLEARED'
 
                 if ticket_result != 'SUMMONED':
