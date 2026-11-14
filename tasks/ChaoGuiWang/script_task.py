@@ -95,6 +95,35 @@ TICKET_GOLD_MIN = 100
 
 STAR_NAMES = {1: '1星', 2: '2星', 3: '3星', 4: '4星', 5: '5星', 6: '6星'}
 
+# ---------------- 门票列表「裂变之眼召唤队列」（坐标基于 1280x720）----------------
+# 右下角「全部队列」右侧的列表图标，实测红框 (1214,488,50,56) 的中心
+TICKET_LIST_BUTTON = (1239, 516)
+# 弹窗内「立即召唤」按钮的橙黄区域，实测 (550,450)-(729,490)
+TICKET_SUMMON_BUTTON = (640, 470)
+# 弹窗右上角紫色关闭叉，实测 (995,155)-(1060,206)
+TICKET_POPUP_CLOSE = (1027, 180)
+# 票卡 85x123、固定间距 98.5px 居中排布；青色选中框 bbox y=299..422 可作锚点
+TICKET_SLOT_PITCH = 98.5
+# 6 张票铺满时的第一个槽位中心；票少时整组居中，但槽位始终落在这个网格上
+TICKET_SLOT_GRID_X0 = 394.5
+TICKET_SLOT_CLICK_Y = 360
+TICKET_SLOT_X_RANGE = (320, 960)
+# 票面底部 6 格勾玉：亮起几格即几星。x0=-32、间距 11、窗口 9x16、y=370..386、
+# S 阈值 122、V 下限 100。10 张素材 49 张票验证 49/49 全对：
+# 亮格最低 129.9、暗格最高 113.5，阈值两侧各留约 8 的余量。
+TICKET_STAR_X0 = -32
+TICKET_STAR_PITCH = 11
+TICKET_STAR_WINDOW_W = 9
+TICKET_STAR_Y0 = 370
+TICKET_STAR_Y1 = 386
+TICKET_STAR_V_MIN = 100
+TICKET_STAR_S_THRESHOLD = 122
+# 弹窗中央浅色背景占比：弹窗素材 0.65~0.82，主界面 0.013
+TICKET_POPUP_LIGHT_ROI = (400, 240, 900, 420)
+TICKET_POPUP_LIGHT_MIN = 0.30
+# 等待疲劳恢复时每隔多少秒采样一次
+FATIGUE_CHECK_INTERVAL = 30
+
 # ---------------- 发现卡片左下角的星级勾玉（协战筛选好友鬼王用）----------------
 # 与上面「召唤界面门票星级」是两套完全不同的界面：这里 6 个勾玉格位并排在
 # 卡片左下角，亮起的个数 = 星级；亮勾玉有橙色、紫色两种形态随机出现，未亮的
@@ -465,6 +494,234 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
     def invite_allowed(self, star: int, cfg) -> bool:
         """当前星级是否「邀请」，协战邀请模式使用。"""
         return self.invite_flags(cfg).get(star, False)
+
+    # ------------------------------------------------------------------
+    # 门票顺位选择（裂变之眼召唤队列）
+    # ------------------------------------------------------------------
+    @staticmethod
+    def parse_ticket_order(text) -> list:
+        """把顺位输入解析成星级优先级列表：忽略非法字符、去重、保序。
+
+        例如 '123456' -> [1,2,3,4,5,6]，'651' -> [6,5,1]，'' -> []。
+        留空或全非法字符都表示不启用顺位，调用方维持原有召唤流程。
+        """
+        if not isinstance(text, str):
+            return []
+        picked = []
+        for ch in text.strip():
+            if ch in '123456':
+                rank = int(ch)
+                if rank not in picked:
+                    picked.append(rank)
+        return picked
+
+    def ticket_popup_open(self) -> bool:
+        """门票列表弹窗是否打开：中央大块浅色背景（弹窗 0.65~0.82 / 主界面 0.013）。"""
+        hsv = cv2.cvtColor(self.device.image, cv2.COLOR_RGB2HSV)
+        x1, y1, x2, y2 = TICKET_POPUP_LIGHT_ROI
+        area = hsv[y1:y2, x1:x2]
+        ratio = float(((area[..., 2] > 190) & (area[..., 1] < 60)).mean())
+        return ratio >= TICKET_POPUP_LIGHT_MIN
+
+    def ticket_selected_center(self):
+        """青色选中框的中心 x；识别不到返回 None。
+
+        框线是亮青色（H 85~105、S>=110、V>=140），10 张素材上 bbox 恒为
+        85x123、y=299..422；限定搜索区避免其它青色 UI 干扰。
+        """
+        hsv = cv2.cvtColor(self.device.image, cv2.COLOR_RGB2HSV)
+        mask = ((hsv[..., 0] >= 85) & (hsv[..., 0] <= 105) &
+                (hsv[..., 1] >= 110) & (hsv[..., 2] >= 140))
+        mask[:290, :] = False
+        mask[430:, :] = False
+        mask[:, :300] = False
+        mask[:, 1000:] = False
+        ys, xs = np.where(mask)
+        if len(xs) < 200:
+            return None
+        return (float(xs.min()) + float(xs.max())) / 2
+
+    def ticket_slot_cells(self, center_x, hsv=None) -> list:
+        """一张票底部 6 格勾玉的平均饱和度；亮起几格即几星。"""
+        if hsv is None:
+            hsv = cv2.cvtColor(self.device.image, cv2.COLOR_RGB2HSV)
+        sat = hsv[..., 1].astype(np.int32)
+        val = hsv[..., 2]
+        cells = []
+        for k in range(6):
+            x = int(round(center_x + TICKET_STAR_X0 + k * TICKET_STAR_PITCH))
+            window = (slice(TICKET_STAR_Y0, TICKET_STAR_Y1),
+                      slice(x, x + TICKET_STAR_WINDOW_W))
+            keep = val[window] >= TICKET_STAR_V_MIN
+            cells.append(int(sat[window][keep].mean()) if keep.any() else 0)
+        return cells
+
+    @staticmethod
+    def cells_to_star(cells) -> int:
+        star = 0
+        for value in cells:
+            if value < TICKET_STAR_S_THRESHOLD:
+                break
+            star += 1
+        return star
+
+    def read_ticket_slots(self) -> list:
+        """返回 [(中心x, 星级)]，按屏幕从左到右。
+
+        以青色选中框中心为锚点，按 98.5px 向左右各探测 5 个槽位；
+        只有能读出 1~6 星（数字条至少一格亮）的槽位才算一张票。
+        """
+        anchor = self.ticket_selected_center()
+        if anchor is None:
+            return []
+        # 青框像素 bbox 有 ±2px 抗锯齿抖动，先对齐再向两侧探测。票数为奇数时
+        # 整组票落在半格上（如 3 张票起点 542.25），所以按半个间距 49.25px 对齐；
+        # 按整格对齐会让这一种排布整体平移，把 5 星读成 6 星。
+        half = TICKET_SLOT_PITCH / 2
+        anchor = (TICKET_SLOT_GRID_X0
+                  + round((anchor - TICKET_SLOT_GRID_X0) / half) * half)
+        hsv = cv2.cvtColor(self.device.image, cv2.COLOR_RGB2HSV)
+        slots = []
+        for k in range(-5, 6):
+            cx = anchor + k * TICKET_SLOT_PITCH
+            if not (TICKET_SLOT_X_RANGE[0] <= cx <= TICKET_SLOT_X_RANGE[1]):
+                continue
+            star = self.cells_to_star(self.ticket_slot_cells(cx, hsv))
+            if 1 <= star <= 6:
+                slots.append((int(round(cx)), star))
+        return slots
+
+    def read_ticket_slots_with_retry(self, times: int = 3) -> list:
+        """卡片弹入动画会遮住数字条，连续两帧读数一致才采信。"""
+        reads = []
+        for _ in range(times):
+            self.screenshot()
+            got = self.read_ticket_slots()
+            reads.append(got)
+            if len(reads) >= 2 and got and got == reads[-2]:
+                return got
+            sleep(1)
+        return reads[-1]
+
+    def close_ticket_popup(self) -> None:
+        self.device.click(TICKET_POPUP_CLOSE[0], TICKET_POPUP_CLOSE[1],
+                          control_name='CGW_TICKET_CLOSE')
+        sleep(0.6)
+        self.screenshot()
+
+    def ensure_ticket_order(self, cfg, allowed, order_text) -> str:
+        """按顺位挑选门票。返回四种结果：
+
+        'UNCHANGED' 当前门票已符合顺位，调用方继续走原有召唤流程；
+        'SUMMONED'  已在弹窗内点「立即召唤」完成召唤，调用方跳过原召唤；
+        'EXHAUSTED' 列表里没有顺位范围内且允许使用的星级票；
+        'FAILED'    弹窗/星级识别失败，调用方沿用原召唤流程（不误结束、不误打）。
+        """
+        order = self.parse_ticket_order(order_text)
+        if not order:
+            return 'UNCHANGED'
+        targets = [rank for rank in order if allowed(rank)]
+        if not targets:
+            return 'EXHAUSTED'
+
+        current = self.read_star_with_retry()
+        if current == targets[0]:
+            return 'UNCHANGED'
+
+        self.device.click(TICKET_LIST_BUTTON[0], TICKET_LIST_BUTTON[1],
+                          control_name='CGW_TICKET_LIST')
+        sleep(1.0)
+        self.screenshot()
+        if not self.ticket_popup_open():
+            logger.warning('门票列表未打开，本轮沿用原有召唤流程')
+            return 'FAILED'
+
+        slots = self.read_ticket_slots_with_retry()
+        if not slots:
+            self.close_ticket_popup()
+            logger.warning('门票列表星级读取失败，本轮沿用原有召唤流程')
+            return 'FAILED'
+
+        pick = None
+        for rank in targets:
+            for cx, star in slots:
+                if star == rank:
+                    pick = (cx, star)
+                    break
+            if pick:
+                break
+        if pick is None:
+            self.close_ticket_popup()
+            return 'EXHAUSTED'
+
+        # 游戏已自动补位到当前最优星级时，不必重复点选，关弹窗走原流程即可
+        if current == pick[1]:
+            self.close_ticket_popup()
+            return 'UNCHANGED'
+
+        self.device.click(pick[0], TICKET_SLOT_CLICK_Y,
+                          control_name='CGW_TICKET_SLOT')
+        sleep(0.6)
+        self.screenshot()
+        anchor = self.ticket_selected_center()
+        if anchor is None or abs(anchor - pick[0]) > 20:
+            self.close_ticket_popup()
+            logger.warning('门票选中未生效，本轮沿用原有召唤流程')
+            return 'FAILED'
+
+        self.device.click(TICKET_SUMMON_BUTTON[0], TICKET_SUMMON_BUTTON[1],
+                          control_name='CGW_TICKET_SUMMON')
+        sleep(1.5)
+        self.screenshot()
+        if self.ticket_popup_open():
+            # 「立即召唤」没生效：票已选中，关弹窗让原流程点主界面「召唤鬼王」
+            self.close_ticket_popup()
+            return 'UNCHANGED'
+        logger.info(f'门票顺位：已切换到 {STAR_NAMES.get(pick[1], pick[1])}并完成召唤')
+        return 'SUMMONED'
+
+    # ------------------------------------------------------------------
+    # 疲劳恢复等待
+    # ------------------------------------------------------------------
+    def wait_fatigue_recover(self, cfg, fatigue, stage: str) -> bool:
+        """疲劳超阈值时等待恢复。True=已恢复可继续；False=未启用/超时/识别失败。
+
+        等待期间持续清掉设备卡死计时器，避免长等待触发 GameStuckError。
+        两条过程推送复用 notify_fatigue_limit 开关，不新增配置项。
+        """
+        target = getattr(cfg, 'resume_fatigue', 101)
+        timeout = getattr(cfg, 'fatigue_wait_timeout', 120)
+        if target >= 101:
+            return False
+
+        self.push('超鬼王·等待疲劳恢复',
+                  f'{stage}疲劳度 {fatigue}/100，超过阈值 {cfg.fatigue_limit}，'
+                  f'开始等待降到 {target} 或以下，最长 {timeout} 分钟。',
+                  enabled=cfg.notify_fatigue_limit)
+        timer = Timer((timeout if timeout > 0 else 1440) * 60).start()
+        unknown = 0
+        while 1:
+            self.device.stuck_record_clear()
+            current = self.get_fatigue()
+            if current is None:
+                unknown += 1
+                if unknown >= 3:
+                    logger.warning('疲劳度连续识别失败，按原逻辑停止任务')
+                    return False
+            else:
+                unknown = 0
+                if current <= target:
+                    self.push('超鬼王·疲劳恢复完成',
+                              f'疲劳度已降到 {current}/100，继续攻打鬼王。',
+                              enabled=cfg.notify_fatigue_limit)
+                    logger.info(f'疲劳度已恢复到 {current}/100，继续任务')
+                    return True
+            if timer.reached():
+                logger.warning(f'等待疲劳恢复超过 {timeout} 分钟，按原逻辑停止任务')
+                return False
+            for _ in range(FATIGUE_CHECK_INTERVAL):
+                self.device.stuck_record_clear()
+                sleep(1)
 
     # ------------------------------------------------------------------
     # 步骤 6~9：召唤、挑战、准备、战斗、结算
@@ -1138,6 +1395,8 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
                     break
                 logger.info(f'当前疲劳度 {fatigue}/100，阈值 {cfg.fatigue_limit}')
                 if fatigue > cfg.fatigue_limit:
+                    if self.wait_fatigue_recover(cfg, fatigue, '召唤前'):
+                        continue
                     self.push('超鬼王·超过疲劳阈值',
                               f'当前疲劳度 {fatigue}/100，超过设定阈值 {cfg.fatigue_limit}，'
                               f'任务结束。已击杀 {killed} 只。',
@@ -1162,6 +1421,21 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
                         break
                 elif by_star:
                     logger.info('现成鬼王界面没有星级勾玉排，本轮不做星级筛选，直接挑战')
+
+                # 门票顺位：只有「可召唤」界面才换得动门票；现成鬼王已召唤，不处理
+                if demon_state == 'READY':
+                    ticket_result = self.ensure_ticket_order(
+                        cfg, lambda rank: self.star_allowed(rank, cfg),
+                        getattr(cfg, 'ticket_order', ''))
+                    if ticket_result == 'EXHAUSTED':
+                        self.push('超鬼王·打完所选星级鬼王',
+                                  f'门票列表里已没有顺位范围内且允许攻打的星级门票，'
+                                  f'任务结束，共击杀 {killed} 只。',
+                                  enabled=cfg.notify_star_cleared)
+                        break
+                    if ticket_result == 'SUMMONED':
+                        # 弹窗内「立即召唤」已完成召唤，fight_once 跳过再次点召唤
+                        need_summon = False
 
             # 步骤 6~9：打一轮（star 用于挑战前按星级切换强追/普追）
             result = self.fight_once(cfg, need_summon, star=star)

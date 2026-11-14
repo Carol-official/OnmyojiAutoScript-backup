@@ -715,16 +715,26 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
                     return invited, (f'识别到 {STAR_NAMES.get(star, star)} 鬼王，'
                                      f'不在勾选的星级范围内，说明所选星级已打完，'
                                      f'共成功邀请 {invited} 只'), 'STAR_CLEARED'
-                # 不点挑战，只召唤；召唤后卡片出现即可点集结
-                if not self.click_stage(self.I_CGW_SUMMON, self.C_CGW_BOTTOM_BUTTON,
-                                        timeout=20, delay=1.0):
-                    timeouts += 1
-                    logger.warning(f'点击「召唤鬼王」超时（连续第 {timeouts} 次）')
-                    if not self.diagnose_and_recover('点击召唤鬼王') \
-                            or timeouts >= cfg.max_consecutive_timeout:
-                        return invited, (f'召唤鬼王失败且界面恢复失败，任务提前结束，'
-                                         f'共成功邀请 {invited} 只'), 'FAILED'
-                    continue
+
+                # 门票顺位：只有可召唤界面换得动门票；已在弹窗点「立即召唤」则跳过原召唤
+                ticket_result = self.ensure_ticket_order(
+                    cfg, lambda rank: self.invite_allowed(rank, cfg),
+                    getattr(cfg, 'ticket_order', ''))
+                if ticket_result == 'EXHAUSTED':
+                    return invited, (f'门票列表里已没有顺位范围内且允许邀请的星级门票，'
+                                     f'共成功邀请 {invited} 只'), 'STAR_CLEARED'
+
+                if ticket_result != 'SUMMONED':
+                    # 不点挑战，只召唤；召唤后卡片出现即可点集结
+                    if not self.click_stage(self.I_CGW_SUMMON, self.C_CGW_BOTTOM_BUTTON,
+                                            timeout=20, delay=1.0):
+                        timeouts += 1
+                        logger.warning(f'点击「召唤鬼王」超时（连续第 {timeouts} 次）')
+                        if not self.diagnose_and_recover('点击召唤鬼王') \
+                                or timeouts >= cfg.max_consecutive_timeout:
+                            return invited, (f'召唤鬼王失败且界面恢复失败，任务提前结束，'
+                                             f'共成功邀请 {invited} 只'), 'FAILED'
+                        continue
 
             # READY 已召唤 / EXISTING 已有卡片：只分享给指定好友。
             # 没找到好友 / 分享失败时按 30 秒重试，连续三次才结束任务并推送
@@ -791,6 +801,22 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
                     f'{cfg.fatigue_limit}，为避免超疲劳，任务提前停止')
         return (f'{stage}时疲劳度 {fatigue}/100，已超过设定阈值 {cfg.fatigue_limit}，'
                 f'为避免继续消耗疲劳，任务停止')
+
+    def fatigue_should_stop(self, status: str, fatigue, cfg,
+                            stage: str, stop_unknown: bool = False) -> bool:
+        """三处疲劳判定共用：返回 True 表示应当按 FATIGUE 结束任务。
+
+        FATIGUE_OVER 且启用了恢复等待时，等成功就返回 False 继续主循环；
+        FATIGUE_UNKNOWN 默认维持原逻辑（结算后只告警、不停止），
+        只有刚进入界面时才按 stop_unknown=True 停止。
+        """
+        if status == FATIGUE_OK:
+            return False
+        if status == FATIGUE_OVER and self.wait_fatigue_recover(cfg, fatigue, stage):
+            return False
+        if status == FATIGUE_UNKNOWN and not stop_unknown:
+            return False
+        return True
 
     def friend_demon_state(self) -> str:
         """识别「好友发现」区域的状态，日志只输出最终结论，不打印模板分数。
@@ -893,7 +919,8 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
         # 识别失败也按停止处理 —— 开局就无法确认疲劳时继续打，有超疲劳的风险。
         self.wait_reward_settle()
         status, fatigue = self.check_fatigue(cfg, '刚进入祸主降临界面')
-        if status != FATIGUE_OK:
+        if self.fatigue_should_stop(status, fatigue, cfg,
+                                     '刚进入祸主降临界面', stop_unknown=True):
             return assists, self.fatigue_stop_reason(
                 status, fatigue, cfg, '刚进入祸主降临界面'), 'FATIGUE'
 
@@ -957,7 +984,7 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
                     # 下一次胜利/失败结算还会再判，不会一路打到底。
                     self.wait_reward_settle()
                     status, fatigue = self.check_fatigue(cfg, '胜利结算后')
-                    if status == FATIGUE_OVER:
+                    if self.fatigue_should_stop(status, fatigue, cfg, '胜利结算后'):
                         return assists, self.fatigue_stop_reason(
                             status, fatigue, cfg, '胜利结算后'), 'FATIGUE'
                     continue
@@ -984,7 +1011,7 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
                     logger.warning(f'协战失败，连续失败 {defeats}/{cfg.max_consecutive_defeat} 次')
                     # 失败结算后同样先判疲劳，再走「连续失败上限」的判定
                     status, fatigue = self.check_fatigue(cfg, '失败结算后')
-                    if status == FATIGUE_OVER:
+                    if self.fatigue_should_stop(status, fatigue, cfg, '失败结算后'):
                         return assists, self.fatigue_stop_reason(
                             status, fatigue, cfg, '失败结算后'), 'FATIGUE'
                     if defeats >= cfg.max_consecutive_defeat:

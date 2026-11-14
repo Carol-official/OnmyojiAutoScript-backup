@@ -165,6 +165,23 @@ class ChaoGuiWangAssistConfig(ConfigBase):
     notify_summary: bool = Field(default=True,
                                  description='任务结束时是否推送一次汇总（含成功次数与总耗时）')
 
+    # ---------------- 门票顺位与疲劳恢复 ----------------
+    # ticket_order 只在邀请模式生效（协战模式打的是好友鬼王，没有自己的门票）；
+    # resume_fatigue / fatigue_wait_timeout 只在协战模式生效（邀请模式不战斗、不判疲劳）。
+    ticket_order: str = Field(
+        default='',
+        description='邀请模式专用·鬼王门票邀请顺位：用 1~6 的数字按优先级排列，'
+                    '例如 123456 表示先召唤 1 星门票；留空表示不启用。'
+                    '「是否邀请」勾选开关仍决定哪些星级允许邀请，顺位只定优先级')
+    resume_fatigue: int = Field(
+        default=101, ge=0, le=101,
+        description='协战模式专用·疲劳度超过阈值时，等到疲劳降到该值或以下再继续协战；'
+                    '填 101 表示不启用，直接按原逻辑推送并停止任务')
+    fatigue_wait_timeout: int = Field(
+        default=120, ge=0, le=1440,
+        description='协战模式专用·等待疲劳恢复的最长分钟数，0 表示不限时；'
+                    '超时或疲劳度连续识别失败时按原逻辑推送并停止任务')
+
 
 class ChaoGuiWangAssist(ConfigBase):
     scheduler: Scheduler = Field(default_factory=Scheduler)

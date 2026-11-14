@@ -124,6 +124,23 @@ class ChaoGuiWangConfig(ConfigBase):
     notify_defeat_limit: bool = Field(default=True,
                                       description='连续挑战失败达到上限、任务停止时是否推送')
 
+    # ---------------- 门票顺位与疲劳恢复 ----------------
+    # 这三个字段只写 description、不加 i18n 键：oasx 用 description 作为显示标题，
+    # 与协战任务同名字段互不冲突（i18n 的扁平命名空间只用于不带 description 的开关）。
+    ticket_order: str = Field(
+        default='',
+        description='鬼王门票攻打顺位：用 1~6 的数字按优先级排列，例如 123456 表示'
+                    '先打 1 星门票、用完再依次打 2~6 星；留空表示不启用，保持原有召唤流程。'
+                    '「是否攻打」勾选开关仍决定哪些星级允许打，顺位只决定允许范围内的优先级')
+    resume_fatigue: int = Field(
+        default=101, ge=0, le=101,
+        description='疲劳度超过阈值时，等到疲劳降到该值或以下再继续攻打；'
+                    '填 101 表示不启用，直接按原逻辑推送并停止任务')
+    fatigue_wait_timeout: int = Field(
+        default=120, ge=0, le=1440,
+        description='等待疲劳恢复的最长分钟数，0 表示不限时；'
+                    '超时或疲劳度连续识别失败时按原逻辑推送并停止任务')
+
 
 class ChaoGuiWang(ConfigBase):
     scheduler: Scheduler = Field(default_factory=Scheduler)
