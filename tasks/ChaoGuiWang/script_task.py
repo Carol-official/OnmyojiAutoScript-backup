@@ -618,6 +618,13 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
         sleep(0.6)
         self.screenshot()
 
+    def lock_ticket_star(self, star: int) -> None:
+        """记住本轮顺位锁定星级；只在首次建立或换顺位时打一条结果日志。"""
+        if getattr(self, 'locked_ticket_star', 0) != star:
+            logger.info(f'门票顺位：锁定 {STAR_NAMES.get(star, star)}，'
+                        f'该星级票用完前不再打开列表')
+        self.locked_ticket_star = star
+
     def ensure_ticket_order(self, cfg, allowed, order_text) -> str:
         """按顺位挑选门票。返回四种结果：
 
@@ -629,6 +636,11 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
         本轮实际要召唤的星级会写进 self.ticket_order_star（未确定为 0）。
         换票前从主界面读到的是旧票的星级，调用方必须用 resolved_star()
         覆盖后再做星级拦截与强追/普追判定。
+
+        跨轮状态 self.locked_ticket_star：首次读列表确定「顺位里最靠前且
+        列表里存在的可用星级」后锁定。只要主界面门票仍是这个星级，就直接走
+        原召唤流程，不再打开列表；门票刷完、游戏补位到别的星级时才重新读
+        列表并更新锁定。这样一轮任务里只在换顺位时开一两次弹窗。
         """
         self.ticket_order_star = 0
         order = self.parse_ticket_order(order_text)
@@ -639,7 +651,14 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
             return 'EXHAUSTED'
 
         current = self.read_star_with_retry()
-        if current == targets[0]:
+        locked = getattr(self, 'locked_ticket_star', 0) or 0
+        if locked and current == locked:
+            # 仍在消耗已锁定的顺位星级：不打开列表、不改星级
+            self.ticket_order_star = locked
+            return 'UNCHANGED'
+        if not locked and current == targets[0]:
+            # 首次且当前门票已是顺位首位，同样不必打开列表
+            self.lock_ticket_star(current)
             self.ticket_order_star = current
             return 'UNCHANGED'
 
@@ -666,11 +685,13 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
             if pick:
                 break
         if pick is None:
+            self.locked_ticket_star = 0
             self.close_ticket_popup()
             return 'EXHAUSTED'
 
         # 游戏已自动补位到当前最优星级时，不必重复点选，关弹窗走原流程即可
         if current == pick[1]:
+            self.lock_ticket_star(current)
             self.ticket_order_star = current
             self.close_ticket_popup()
             return 'UNCHANGED'
@@ -692,11 +713,15 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
         if self.ticket_popup_open():
             # 「立即召唤」没生效：票已选中，关弹窗让原流程点主界面「召唤鬼王」；
             # 原流程召唤用的仍是这张选中的票，星级要按它算
+            self.lock_ticket_star(pick[1])
             self.ticket_order_star = pick[1]
             self.close_ticket_popup()
             return 'UNCHANGED'
+        # 这里已有「已切换到 X」的结果日志，直接锁定即可，避免再打一条重复日志
+        self.locked_ticket_star = pick[1]
         self.ticket_order_star = pick[1]
-        logger.info(f'门票顺位：已切换到 {STAR_NAMES.get(pick[1], pick[1])}并完成召唤')
+        logger.info(f'门票顺位：已切换到 {STAR_NAMES.get(pick[1], pick[1])}并完成召唤，'
+                    f'该星级票用完前不再打开列表')
         return 'SUMMONED'
 
     def resolved_star(self, star: int) -> int:
