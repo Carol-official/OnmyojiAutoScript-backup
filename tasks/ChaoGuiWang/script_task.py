@@ -317,11 +317,20 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
     # 步骤 2：点击祸主降临
     # ------------------------------------------------------------------
     def open_huozhu(self) -> bool:
-        """点击「祸主降临」，直到第 3 步的鬼面图标出现。"""
+        """点击「祸主降临」，直到第 3 步界面就绪。
+
+        第 3 步界面有两种形态：鬼面图标在（READY，可召唤），或界面上已经有
+        召唤出来的鬼王（EXISTING，只显示「挑战」按钮、没有鬼面图标）。
+        早期只等鬼面图标，EXISTING 时会白等 30 秒再走诊断恢复（实机
+        02:28:11 日志），所以把「召唤 / 挑战按钮可见」也当作已就绪；
+        后续 wait_demon_icon() 自己会区分 READY 与 EXISTING。
+        """
         timer = Timer(30).start()
         while 1:
             self.screenshot()
-            if self.appear(self.I_CGW_DEMON_ICON):
+            if (self.appear(self.I_CGW_DEMON_ICON)
+                    or self.appear(self.I_CGW_SUMMON)
+                    or self.appear(self.I_CGW_CHALLENGE)):
                 logger.info('已进入祸主降临界面')
                 return True
             if self.appear_then_click(self.I_CGW_HUOZHU,
