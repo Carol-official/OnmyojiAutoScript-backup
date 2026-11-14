@@ -17,8 +17,13 @@
 --------------------------------------------------------------------
 邀请模式：
     4. 等「自己发现」红框内的鬼面图标出现（已有自己的鬼王卡片则跳过召唤）
-    5. 识别鬼王星级（圆形图标下方橙色勾玉个数），只处理勾选的星级；
-       六个星级开关全不勾时任务启动即退出，识别到未勾选星级则推送并结束
+    5. 识别鬼王星级，只邀请勾选的星级：
+       - 可召唤界面读圆形图标下方的橙色勾玉（read_star_with_retry）；
+       - 进入界面时已有召唤鬼王，则读【自己发现】卡片头像框底部的勾玉
+         （与协战好友卡片同一套逐格饱和度判据，仅 y 位置不同）；
+       - 六个星级开关全不勾时启动即退出；可召唤界面识别到未勾选星级推送并结束；
+         已有召唤鬼王不在范围时不邀请、推送一条并等这只结束后继续下一轮；
+         已有召唤鬼王星级读不到则结束任务并推送失败
     6. 不判疲劳、不点挑战：点「召唤鬼王」，再点卡片右上角的「集结」印章
     7. 分享弹窗里只找配置指定的那一位好友（好友页签 → 寮友页签），点中他再点
        「邀请」；两个页签都没有就按 30 秒间隔重试，连续 3 次失败才结束任务并推送
@@ -45,6 +50,7 @@
 
 推送：只保留任务完成、任务完全失败、打完所选星级、无协战鬼王、邀请超时、
 未找到指定好友、连续邀请失败、超过疲劳阈值、连续协战失败、任务结束汇总十类；
+另有「跳过未勾选星级鬼王」过程推送，复用 notify_star_cleared 开关，不新增配置项；
 其中「连续邀请失败」与「未找到指定好友」共用 notify_friend_missing 开关，
 「超过疲劳阈值」用 notify_fatigue_limit 开关，其余各有独立开关，
 并受 notify_enable 总开关控制；按需求，成功次数不在过程中逐条推送，
@@ -61,7 +67,9 @@ from module.base.timer import Timer
 from module.exception import TaskEnd
 from module.logger import logger
 
-from tasks.ChaoGuiWang.script_task import ScriptTask as ChaoGuiWangTask, STAR_NAMES
+from tasks.ChaoGuiWang.script_task import (
+    ScriptTask as ChaoGuiWangTask, STAR_NAMES, CARD_STAR_Y_SELF,
+)
 from tasks.ChaoGuiWangAssist.assets import ChaoGuiWangAssistAssets
 from tasks.ChaoGuiWangAssist.config import ChaoGuiWangAssistMode
 from tasks.GameUi.page import page_main
@@ -122,6 +130,16 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
         flags = self.invite_flags(cfg)
         picked = [f'{rank}星' for rank in sorted(flags) if flags[rank]]
         return '、'.join(picked) if picked else '无'
+
+    def read_self_card_star_with_retry(self, times: int = 3) -> int:
+        """读「自己发现」卡片（已有召唤鬼王）的星级，返回 1~6，0 表示读不到。
+
+        与协战模式判断好友鬼王星级完全一致：同一组格位、同一套「每格平均
+        饱和度」判据，只是星级行在左上角【自己发现】区域 CARD_STAR_Y_SELF(205)，
+        而不是好友发现卡片的 443。调用方必须先确认自己发现的卡片确实存在，
+        否则其它界面上的高饱和 UI 会给出伪星数。
+        """
+        return self.read_card_star_with_retry(times=times, y=CARD_STAR_Y_SELF)
 
     # 点击前随机等待的「已等待」豁免截止时间，避开父类自带的等待造成双重等待
     _skip_click_deadline = 0.0
@@ -645,6 +663,50 @@ class ScriptTask(ChaoGuiWangTask, ChaoGuiWangAssistAssets):
                     return invited, (f'等待鬼面图标超时且界面恢复失败，任务提前结束，'
                                      f'共成功邀请 {invited} 只'), 'FAILED'
                 continue
+
+            if state == 'EXISTING':
+                # 进入界面时已有一只召唤好的鬼王：先读它的星级，再决定是否邀请。
+                # 星级勾玉在【自己发现】卡片头像框底部，与协战好友卡片用同一套
+                # 逐格饱和度判据，只是星级行的 y 位置不同（205 而不是 443）。
+                self.screenshot()
+                if not (self.self_card_exists() or self.appear(self.I_CGW_CHALLENGE)):
+                    logger.error('判定为已有召唤鬼王，复核时卡片已消失，无法读取星级')
+                    return invited, (f'已有召唤鬼王的卡片复核失败，为避免误邀请，'
+                                     f'任务结束，共成功邀请 {invited} 只'), 'FAILED'
+                star = self.read_self_card_star_with_retry()
+                diag = getattr(self, '_card_star_diag', '')
+                if not star:
+                    logger.error(f'已有召唤鬼王星级识别失败（逐格饱和度 {diag}）')
+                    return invited, (f'已有召唤鬼王星级识别失败（逐格饱和度 {diag}），'
+                                     f'为避免误邀请未选定星级，任务结束，'
+                                     f'共成功邀请 {invited} 只'), 'FAILED'
+                logger.info(f'识别到已召唤鬼王星级：{STAR_NAMES.get(star, star)}'
+                            f'（逐格饱和度 {diag}）')
+                if not self.invite_allowed(star, cfg):
+                    self.push('超鬼王协战·跳过未勾选星级鬼王',
+                              f'已有召唤鬼王为{STAR_NAMES.get(star, star)}，'
+                              f'不在「是否邀请」勾选范围内，本轮不邀请，等待下一只。'
+                              f'当前已成功邀请 {invited} 只。',
+                              enabled=cfg.notify_star_cleared)
+                    logger.info(f'{STAR_NAMES.get(star, star)} 不在邀请范围内，'
+                                f'不邀请，等待这只鬼王结束后继续下一轮')
+                    skipped_rounds = 0
+                    while 1:
+                        result = self.wait_demon_return(cfg, reinvite=False)
+                        if result == 'READY':
+                            logger.info('未邀请的鬼王已结束，回到主循环等待下一只')
+                            break
+                        if result == 'EMPTY':
+                            return invited, (f'所有鬼王门票已打完（图标显示金色鬼面），'
+                                             f'共成功邀请 {invited} 只'), 'COMPLETE'
+                        skipped_rounds += 1
+                        logger.warning(f'等待未邀请鬼王结束超时（第 {skipped_rounds} 轮）')
+                        if skipped_rounds >= WAIT_ROUND_BEFORE_DIAGNOSE:
+                            if not self.diagnose_and_recover('等待未邀请的鬼王结束'):
+                                return invited, (f'等待未邀请鬼王结束期间界面恢复失败，'
+                                                 f'任务提前结束，共成功邀请 {invited} 只'), 'FAILED'
+                            skipped_rounds = 0
+                    continue
 
             if state == 'READY':
                 star = self.read_star_with_retry()

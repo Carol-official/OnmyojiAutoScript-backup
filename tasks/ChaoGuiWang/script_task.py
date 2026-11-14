@@ -113,12 +113,18 @@ CARD_STAR_SPACING = 11          # 相邻勾玉左边界间距
 CARD_STAR_WINDOW_W = 6          # 只取勾玉本体中间 6px，避开两侧描边
 CARD_STAR_WINDOW_H = 13         # 窗口高
 CARD_STAR_Y = 443               # 「好友发现」卡片的星级行（协战只打好友的鬼王）
+# 「自己发现」卡片的星级行：勾玉尺寸与判据和好友卡片完全一致，只是 y 位置不同。
+# 2026-11-14 用实机截图（3 星）与历史素材 s14（6 星）重新标定：x=58 / 间距 11 /
+# 窗口 6x13 / y=205 时逐格平均 S 分别为 [199,201,197,33,32,31] 与
+# [197,201,204,207,201,192]，阈值 110 两侧余量均 > 70。
+CARD_STAR_Y_SELF = 205          # 邀请模式「已有召唤鬼王」时读这一条带
 CARD_STAR_S_THRESHOLD = 110     # 每格平均饱和度 >= 110 判亮（亮 170+，暗 55-）
 CARD_STAR_V_MIN = 110           # 求平均时跳过勾玉之间的暗缝像素
-# 曾经还多算一条「自己发现」卡片带（y=205）取两者较大值。但那条带上的卡片
-# 是另一套尺寸（勾玉从 x≈45 起、间距≈12），用好友卡片的格位去套会整片错位，
-# 反而可能把左侧「自己发现」的卡片当成好友卡片的星级——而协战模式下从来不
-# 需要它。所以只认好友卡片这一条带，读不到就按 SKIP 处理（不误打）。
+# 旧版曾用「两条带取较大值」同时算自己发现卡片（y≈205），当时用像素计数判据
+# 误以为那是另一套尺寸（x≈45、间距≈12）；改用平均饱和度判据并重新标定后确认
+# 尺寸一致。现在 read_card_star(y=...) 支持指定带：协战模式仍只用好友带，
+# 邀请模式在「已有召唤鬼王」时显式传 CARD_STAR_Y_SELF。读之前调用方必须先
+# 确认卡片确实出现，否则其它界面上的高饱和 UI 会给出伪星数。
 
 # ---------------- 「好友发现」卡片的身份指纹（避免对同一张卡反复点击）----------------
 # 星级不在攻打范围时主循环会继续等下一只鬼王，但卡片不会消失，于是每轮都会
@@ -466,17 +472,19 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
     # ------------------------------------------------------------------
     # 发现卡片星级 / 强追模式 / 击败奖励结算中
     # ------------------------------------------------------------------
-    def read_card_star(self) -> int:
-        """读「发现卡片」左下角的星级（协战筛选好友鬼王用），返回 1~6，0 表示没读到。
+    def read_card_star(self, y: int = CARD_STAR_Y) -> int:
+        """读「发现卡片」左下角的星级，返回 1~6，0 表示没读到。
 
         判据是「每格的平均饱和度」，不是「亮像素个数」：亮勾玉（橙色/紫色两种
         随机形态）平均 S 在 170 以上，灰暗勾玉只有 55 以下，中间没有重叠；
         数像素的老办法会把格子边缘的金色底纹和卡片边框一起数进来——实机上
         正是这样把 4 星读成了 6 星。求平均时跳过 V < CARD_STAR_V_MIN 的像素，
         避开勾玉之间的暗缝。
-        只认「好友发现」卡片那一条带（y=443）：协战模式只打好友的鬼王，左侧
-        「自己发现」的卡片是另一套尺寸，套同一组格位会整片错位。
-        调用方应先确认卡片确实出现，否则其它界面上的高饱和 UI 会给出伪星数。
+
+        y 指定星级行：默认 CARD_STAR_Y(443) 是「好友发现」卡片，协战模式用；
+        CARD_STAR_Y_SELF(205) 是「自己发现」卡片，邀请模式判断已有召唤鬼王时用。
+        两张卡片的勾玉尺寸、间距与阈值完全一致，只是纵坐标不同。
+        调用方应先确认对应卡片确实出现，否则其它界面上的高饱和 UI 会给出伪星数。
         """
         hsv = cv2.cvtColor(self.device.image, cv2.COLOR_RGB2HSV)
         sat = hsv[..., 1].astype(np.int32)
@@ -484,7 +492,7 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
         cells = []
         for k in range(6):
             x = CARD_STAR_X_START + k * CARD_STAR_SPACING
-            window = (slice(CARD_STAR_Y, CARD_STAR_Y + CARD_STAR_WINDOW_H),
+            window = (slice(y, y + CARD_STAR_WINDOW_H),
                       slice(x, x + CARD_STAR_WINDOW_W))
             keep = val[window] >= CARD_STAR_V_MIN
             cells.append(int(sat[window][keep].mean()) if keep.any() else 0)
@@ -496,12 +504,16 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
             star += 1
         return star
 
-    def read_card_star_with_retry(self, times: int = 3) -> int:
-        """卡片星级偶尔会被卡片弹入动画遮住，连续两帧读数一致才采信。"""
+    def read_card_star_with_retry(self, times: int = 3, y: int = CARD_STAR_Y) -> int:
+        """卡片星级偶尔会被卡片弹入动画遮住，连续两帧读数一致才采信。
+
+        y 传给 read_card_star：默认好友发现带；邀请模式读已有召唤鬼王时传
+        CARD_STAR_Y_SELF。
+        """
         reads = []
         for _ in range(times):
             self.screenshot()
-            star = self.read_card_star()
+            star = self.read_card_star(y=y)
             reads.append((star, getattr(self, '_card_star_diag', '')))
             if len(reads) >= 2 and star and star == reads[-2][0]:
                 return star
