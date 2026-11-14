@@ -108,16 +108,18 @@ TICKET_SLOT_PITCH = 98.5
 TICKET_SLOT_GRID_X0 = 394.5
 TICKET_SLOT_CLICK_Y = 360
 TICKET_SLOT_X_RANGE = (320, 960)
-# 票面底部 6 格勾玉：亮起几格即几星。x0=-32、间距 11、窗口 9x16、y=370..386、
-# S 阈值 122、V 下限 100。10 张素材 49 张票验证 49/49 全对：
-# 亮格最低 129.9、暗格最高 113.5，阈值两侧各留约 8 的余量。
-TICKET_STAR_X0 = -32
+# 票面底部 6 格勾玉：亮起几格即几星。x0=-33、间距 11、窗口 11x10、y=374..384、
+# S 阈值 125、V 下限 100。11 张素材 53 张票验证 53/53 全对。
+# 旧参数（窗口 9x16、y=370..386、阈值 122）亮暗间隔只有 8，实机动画帧里
+# 4 星票首格掉到 120 就被整张判成 0 星丢弃，顺位因此退到更低的星级；
+# 重标定后亮格最低 141、暗格最高 116，两侧间隔 25，抗光效抖动明显更强。
+TICKET_STAR_X0 = -33
 TICKET_STAR_PITCH = 11
-TICKET_STAR_WINDOW_W = 9
-TICKET_STAR_Y0 = 370
-TICKET_STAR_Y1 = 386
+TICKET_STAR_WINDOW_W = 11
+TICKET_STAR_Y0 = 374
+TICKET_STAR_Y1 = 384
 TICKET_STAR_V_MIN = 100
-TICKET_STAR_S_THRESHOLD = 122
+TICKET_STAR_S_THRESHOLD = 125
 # 弹窗中央浅色背景占比：弹窗素材 0.65~0.82，主界面 0.013
 TICKET_POPUP_LIGHT_ROI = (400, 240, 900, 420)
 TICKET_POPUP_LIGHT_MIN = 0.30
