@@ -228,5 +228,17 @@
   "wait_icon_timeout": "等待鬼面图标超时(秒)",
   "wait_icon_interval": "鬼面图标检查间隔(秒)",
   "battle_timeout": "单场战斗超时(秒)",
-  "max_consecutive_timeout": "连续超时上限"
+  "max_consecutive_timeout": "连续超时上限",
+  "target_mode": "结束条件",
+  "ticket_order": "门票星级顺位",
+  "resume_fatigue": "疲劳恢复目标",
+  "fatigue_wait_timeout": "等待疲劳上限(分钟)",
+  "max_consecutive_defeat": "连续失败上限",
+  "notify_enable": "消息推送总开关",
+  "notify_task_complete": "任务完成时推送",
+  "notify_task_failed": "任务失败时推送",
+  "notify_star_cleared": "所选星级打完时推送",
+  "notify_count_cleared": "达到数量时推送",
+  "notify_defeat_limit": "连续失败达上限时推送",
+  "notify_friend_missing": "找不到指定好友时推送"
 }

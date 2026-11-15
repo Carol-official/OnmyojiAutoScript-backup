@@ -25,6 +25,14 @@ class ChaoGuiWangConfig(ConfigBase):
     # 数量模式
     kill_count: int = Field(default=30, ge=1, le=999,
                             description='需要击杀的超鬼王数量（按数量模式生效）')
+    # 门票星级顺位：与「结束条件」同属顶层决策，紧跟其后。
+    # 显示标题取自 assets/i18n/zh-CN.json 的同名键，description 作为下方说明行。
+    ticket_order: str = Field(
+        default='',
+        description='鬼王门票攻打顺位：用 1~6 的数字按优先级排列，例如 123456 表示'
+                    '先打 1 星门票、用完再依次打 2~6 星；留空表示不启用，保持原有召唤流程。'
+                    '「是否攻打」勾选开关仍决定哪些星级允许打，顺位只决定允许范围内的优先级')
+
 
     # ---------------- 每个星级的处理开关 ----------------
     # 「是否攻打」替代旧的 star_rank_N：识别到未勾选的星级就不打这只鬼王。
@@ -87,10 +95,20 @@ class ChaoGuiWangConfig(ConfigBase):
             data.pop(key, None)
         return data
 
-    # ---------------- 运行节奏与保护 ----------------
+    # ---------------- 疲劳度与恢复 ----------------
     # 疲劳度上限，游戏内 100 为满；当前值「超过」该配置才停止
     fatigue_limit: int = Field(default=90, ge=1, le=100,
                                description='疲劳度阈值（100为满），当前疲劳度超过该值时推送并停止任务')
+    resume_fatigue: int = Field(
+        default=101, ge=0, le=101,
+        description='疲劳度超过阈值时，等到疲劳降到该值或以下再继续攻打；'
+                    '填 101 表示不启用，直接按原逻辑推送并停止任务')
+    fatigue_wait_timeout: int = Field(
+        default=120, ge=0, le=1440,
+        description='等待疲劳恢复的最长分钟数，0 表示不限时；'
+                    '超时或疲劳度连续识别失败时按原逻辑推送并停止任务')
+
+    # ---------------- 运行节奏与保护 ----------------
     # 第3步：等待「自己发现」区域鬼面图标出现
     wait_icon_timeout: int = Field(default=40, ge=5, le=300,
                                    description='第3步等待鬼面图标出现的最长秒数')
@@ -123,23 +141,6 @@ class ChaoGuiWangConfig(ConfigBase):
                                        description='疲劳度超过阈值、任务停止时是否推送')
     notify_defeat_limit: bool = Field(default=True,
                                       description='连续挑战失败达到上限、任务停止时是否推送')
-
-    # ---------------- 门票顺位与疲劳恢复 ----------------
-    # 这三个字段只写 description、不加 i18n 键：oasx 用 description 作为显示标题，
-    # 与协战任务同名字段互不冲突（i18n 的扁平命名空间只用于不带 description 的开关）。
-    ticket_order: str = Field(
-        default='',
-        description='鬼王门票攻打顺位：用 1~6 的数字按优先级排列，例如 123456 表示'
-                    '先打 1 星门票、用完再依次打 2~6 星；留空表示不启用，保持原有召唤流程。'
-                    '「是否攻打」勾选开关仍决定哪些星级允许打，顺位只决定允许范围内的优先级')
-    resume_fatigue: int = Field(
-        default=101, ge=0, le=101,
-        description='疲劳度超过阈值时，等到疲劳降到该值或以下再继续攻打；'
-                    '填 101 表示不启用，直接按原逻辑推送并停止任务')
-    fatigue_wait_timeout: int = Field(
-        default=120, ge=0, le=1440,
-        description='等待疲劳恢复的最长分钟数，0 表示不限时；'
-                    '超时或疲劳度连续识别失败时按原逻辑推送并停止任务')
 
 
 class ChaoGuiWang(ConfigBase):
