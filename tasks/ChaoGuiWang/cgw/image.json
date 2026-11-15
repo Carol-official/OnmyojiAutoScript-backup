@@ -2,20 +2,20 @@
   {
     "itemName": "cgw_entry",
     "imageName": "cgw_cgw_entry.png",
-    "roiFront": "1186,220,38,38",
+    "roiFront": "1190,298,34,36",
     "roiBack": "1140,110,145,450",
     "method": "Template matching",
-    "threshold": 0.7,
-    "description": "庭院右侧超鬼王圆形图标内部的蓝色法阵核心（不含金边、飘带、竖排文字与光效，动画帧A）；搜索区覆盖右侧活动列全部五个槽位，图标出现在哪个槽位都能命中"
+    "threshold": 0.75,
+    "description": "2026-11-16 新皮的超鬼王活动入口（浅蓝图案）内部核心，34x36 紧裁不含金边、竖排「超鬼王」文字与「44时」倒计时数字；搜索区覆盖右侧活动列全部槽位，图标换槽位也能命中。六帧实机 0.9867~1.0000，99 张其它界面与旧皮截图最高 0.6324（两模板取高）"
   },
   {
     "itemName": "cgw_entry_alt",
     "imageName": "cgw_cgw_entry_alt.png",
-    "roiFront": "1186,220,38,38",
+    "roiFront": "1190,298,34,36",
     "roiBack": "1140,110,145,450",
     "method": "Template matching",
-    "threshold": 0.7,
-    "description": "超鬼王圆形图标内部蓝色法阵核心（动画帧B，作为核心区域的兜底帧）；搜索区同样覆盖右侧活动列五个槽位"
+    "threshold": 0.75,
+    "description": "同一入口图标的另一帧（兜底帧），ROI 与主模板一致；实机六帧互测 0.9867~0.9941，两帧任一命中即视为图标存在"
   },
   {
     "itemName": "cgw_huozhu",

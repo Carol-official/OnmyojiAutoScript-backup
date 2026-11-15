@@ -242,7 +242,7 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
     def match_cgw_entry(self):
         """在右侧活动列里找出当前帧命中入口模板的规则对象，未命中返回 None。
 
-        超鬼王图标的槽位不固定（右侧活动列五个槽位都可能出现），所以两个
+        超鬼王图标的槽位不固定（右侧活动列各槽位都可能出现），所以两个
         模板的搜索区都放大到了整列（`1140,110,145,450`）。RuleImage.match()
         命中后会把 roi_front 改写成实际命中的绝对坐标，因此点击必须取
         `front_center()`，不能再点写死的固定点。
@@ -255,9 +255,10 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
     def cgw_entry_visible(self) -> bool:
         """庭院右侧活动列是否存在超鬼王图标。
 
-        模板只取圆形图标内部的蓝色法阵核心（38x38），不含会随动画变化的
-        金色外圈、飘带、竖排文字和光晕。五张不同帧的实机截图上分数稳定在
-        0.95 以上，其它界面最高仅 0.43，因此阈值可以提到 0.7。
+        模板只取圆形图标内部的浅蓝图案核心（34x36），不含会随动画变化的
+        金色外圈、飘带、竖排「超鬼王」文字与「44时」倒计时。
+        2026-11-16 换皮后重裁：六帧实机 0.9784~1.0000，99 张其它界面与旧皮
+        截图最高 0.6324，所以阈值提到 0.75。
         仍保留两个不同帧的核心模板作为兜底，任一命中即认为图标存在。
         """
         return self.match_cgw_entry() is not None

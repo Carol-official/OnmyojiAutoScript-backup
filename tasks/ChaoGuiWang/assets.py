@@ -35,9 +35,9 @@ class ChaoGuiWangAssets:
 
 	# Image Rule Assets
 	# 庭院右侧超鬼王活动入口图标，搜索区覆盖活动列五个槽位
-	I_CGW_ENTRY = RuleImage(roi_front=(1186,220,38,38), roi_back=(1140,110,145,450), threshold=0.7, method="Template matching", file="./tasks/ChaoGuiWang/cgw/cgw_cgw_entry.png")
+	I_CGW_ENTRY = RuleImage(roi_front=(1190,298,34,36), roi_back=(1140,110,145,450), threshold=0.75, method="Template matching", file="./tasks/ChaoGuiWang/cgw/cgw_cgw_entry.png")
 	# 同一入口图标的另一动画帧，两帧任一命中即视为图标存在 
-	I_CGW_ENTRY_ALT = RuleImage(roi_front=(1186,220,38,38), roi_back=(1140,110,145,450), threshold=0.7, method="Template matching", file="./tasks/ChaoGuiWang/cgw/cgw_cgw_entry_alt.png")
+	I_CGW_ENTRY_ALT = RuleImage(roi_front=(1190,298,34,36), roi_back=(1140,110,145,450), threshold=0.75, method="Template matching", file="./tasks/ChaoGuiWang/cgw/cgw_cgw_entry_alt.png")
 	# 活动主界面祸主降临竖排文字 
 	I_CGW_HUOZHU = RuleImage(roi_front=(890,55,70,215), roi_back=(830,20,220,300), threshold=0.65, method="Template matching", file="./tasks/ChaoGuiWang/cgw/cgw_cgw_huozhu.png")
 	# 自己发现区域的鬼面图标，用于判定第3步界面已就绪 
