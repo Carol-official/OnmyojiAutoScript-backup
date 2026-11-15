@@ -117,6 +117,11 @@ class ChaoGuiWangConfig(ConfigBase):
     # 第7步：点击准备后等待鬼王打完并出现结算界面
     battle_timeout: int = Field(default=200, ge=30, le=600,
                                 description='点击准备后等待战斗结束并结算的最长秒数')
+    # 进场后给 BOSS 打一次红标：一场战斗只在开局尝试一次，失败只告警
+    red_mark_boss: bool = Field(
+        default=False,
+        description='进入战斗后给 BOSS 打一次红标；连续 3 次未识别到「已标记」就放弃本场，'
+                    '只在日志告警，不推送')
     # 连续挑战失败（出现「失败」结算界面）保护
     max_consecutive_defeat: int = Field(default=3, ge=1, le=20,
                                         description='连续挑战失败达到该次数后停止任务并推送，'

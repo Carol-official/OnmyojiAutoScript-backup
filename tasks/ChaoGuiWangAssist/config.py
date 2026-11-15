@@ -147,6 +147,11 @@ class ChaoGuiWangAssistConfig(ConfigBase):
     # ---------------- 战斗保护 ----------------
     battle_timeout: int = Field(default=200, ge=30, le=600,
                                 description='协战点击准备后等待战斗结束并结算的最长秒数')
+    # 协战进场后给好友的鬼王打一次红标：一场战斗只在开局尝试一次，失败只告警
+    red_mark_boss: bool = Field(
+        default=False,
+        description='协战进入战斗后给鬼王打一次红标；连续 3 次未识别到「已标记」就放弃本场，'
+                    '只在日志告警，不推送')
     max_consecutive_defeat: int = Field(default=3, ge=1, le=20,
                                         description='连续协战失败达到该次数后停止任务并推送，'
                                                     '通常意味着御魂或阵容配置有问题')

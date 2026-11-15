@@ -61,6 +61,13 @@ PREPARE_RETRY_INTERVAL = 2.5    # 两次补点之间的最小间隔
 PREPARE_OBSERVE_WINDOW = 3.0    # 每次点击后的补点观察窗口（秒）
 PREPARE_RETRY_LIMIT = 6         # 最多补点次数
 
+# ---------------- 红标 BOSS（战斗中给 BOSS 打标记）----------------
+# 进入战斗后点一次左上角 BOSS 头像即打上红标，头像下方随之出现「已标记」标签。
+# 连续这么多次点完仍识别不到标签就放弃本场：只告警，不推送、不入诊断恢复、
+# 不改变等待结算的流程，下一场战斗重新尝试。
+BOSS_MARK_RETRY_LIMIT = 3
+BOSS_MARK_CLICK_DELAY = (0.9, 1.3)  # 点完头像后等标签画出来的时间区间（秒）
+
 # 点击「召唤鬼王」「挑战」按钮之前的随机等待区间（秒）。
 # 只在这两个按钮已经稳定出现之后等待，既模拟人工反应，也错开界面切换动画。
 BEFORE_CLICK_DELAY = (1.5, 3.0)
@@ -183,6 +190,9 @@ REWARD_SETTLE_INTERVAL = 1.0    # 检查间隔（秒）
 
 class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAssets):
     """超鬼王（祸主降临）任务。"""
+
+    # 本场战斗是否已经尝试过红标 BOSS；每场战斗在 fight_once() 开头重置
+    boss_mark_done = False
 
     # ------------------------------------------------------------------
     # 推送
@@ -1029,7 +1039,39 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
                 return False
             sleep(PREPARE_FRAME_INTERVAL if stable > 1 else 0.3)
 
-    def confirm_battle_started(self) -> bool:
+    def mark_boss_once(self, cfg) -> None:
+        """战斗开局给 BOSS 打红标，每场战斗最多尝试一次。
+
+        调用方必须先确认「当前成绩」可见（即真正进入战斗），本方法只负责
+        「看是否已标记 → 没标记就点头像 → 复核」这一件事。判据与失败处理
+        按需求固定为：
+          - 头像下方已出现「已标记」标签 → 记一条 info，本场不重复点击；
+          - 未标记 → 点左上角头像的圆形图标，等标签画出来再截图复核，最多 3 次；
+          - 连续 3 次都识别不到「已标记」→ 单条 WARNING 后放弃本场；
+          - 失败只写日志：不推送、不补点、不触发界面诊断恢复，
+            也不影响随后等待结算的流程。
+        """
+        if self.boss_mark_done:
+            return
+        if not getattr(cfg, 'red_mark_boss', False):
+            return
+        self.boss_mark_done = True
+        self.screenshot()
+        if self.appear(self.I_CGW_BOSS_MARKED):
+            logger.info('BOSS 已处于「已标记」状态，本场不重复标记')
+            return
+        for i in range(1, BOSS_MARK_RETRY_LIMIT + 1):
+            self.click(self.C_CGW_BOSS_PORTRAIT, interval=1.0)
+            sleep(random.uniform(*BOSS_MARK_CLICK_DELAY))
+            self.screenshot()
+            if self.appear(self.I_CGW_BOSS_MARKED):
+                logger.info(f'BOSS 红标成功（第 {i} 次点击）')
+                return
+            logger.warning(f'红标 BOSS 第 {i}/{BOSS_MARK_RETRY_LIMIT} 次点击后仍未识别到「已标记」')
+        logger.warning(f'BOSS 红标失败（连续 {BOSS_MARK_RETRY_LIMIT} 次未识别到「已标记」），'
+                       f'本场战斗不再标记')
+
+    def confirm_battle_started(self, cfg=None) -> bool:
         """步骤 8 的闭环：确认「准备」点击真的生效，没生效就 WARNING 重新点。
 
         按用户指定的判据：只有识别到战斗界面左上角「当前成绩」四字，
@@ -1055,6 +1097,10 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
             # 唯一可靠的开战判据：战斗界面左上角「当前成绩」字样
             if self.appear(self.I_CGW_CURRENT_SCORE):
                 logger.info('识别到「当前成绩」，确认「准备」已生效、战斗已开始')
+                # 只有这里才是「刚进战斗」的唯一时机，红标只在此处触发；
+                # cfg 缺省时直接跳过，兼容未传参的旧调用
+                if cfg is not None:
+                    self.mark_boss_once(cfg)
                 return True
             # 战斗可能在两次截图之间就结束，结算画面同样算成功
             if (self.appear(self.I_CGW_SETTLE)
@@ -1150,6 +1196,8 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
         交给外层做「逐个模板诊断界面 + 按流程恢复」。
         """
         self.last_timeout_stage = ''
+        # 每一场战斗都要重新判断一次红标，上一场的「已尝试」不应带过来
+        self.boss_mark_done = False
         # 打完上一只鬼王后可能还在「击败奖励结算中」，期间召唤/挑战都无效
         self.wait_reward_settle()
         if need_summon:
@@ -1177,7 +1225,7 @@ class ScriptTask(RightActivity, SwitchSoul, GeneralBattleAssets, ChaoGuiWangAsse
                                 pre_delay=BEFORE_CLICK_DELAY):
             self.last_timeout_stage = '点击准备'
             return 'TIMEOUT'
-        if not self.confirm_battle_started():
+        if not self.confirm_battle_started(cfg):
             self.last_timeout_stage = '确认进入战斗（准备界面）'
             return 'TIMEOUT'
 

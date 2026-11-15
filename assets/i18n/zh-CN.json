@@ -228,6 +228,7 @@
   "wait_icon_timeout": "等待鬼面图标超时(秒)",
   "wait_icon_interval": "鬼面图标检查间隔(秒)",
   "battle_timeout": "单场战斗超时(秒)",
+  "red_mark_boss": "红标 BOSS",
   "max_consecutive_timeout": "连续超时上限",
   "target_mode": "结束条件",
   "ticket_order": "门票星级顺位",

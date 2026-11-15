@@ -29,6 +29,8 @@ class ChaoGuiWangAssets:
 	C_CGW_SETTLE_RIGHT = RuleClick(roi_front=(833,267,229,258), roi_back=(833,267,229,258), name="cgw_settle_right")
 	# 结算界面白色框选的底部条状区域
 	C_CGW_SETTLE_BOTTOM = RuleClick(roi_front=(37,565,835,63), roi_back=(37,565,835,63), name="cgw_settle_bottom")
+	# 战斗界面左上角 BOSS 头像的圆形图标中心区域，点击即在战斗中给该 BOSS 打红标；避开头像框左上角的等级菱形与右侧回合数球。头像里的式神随鬼王变化，不能做模板，所以用固定坐标
+	C_CGW_BOSS_PORTRAIT = RuleClick(roi_front=(382,16,42,40), roi_back=(382,16,42,40), name="cgw_boss_portrait")
 
 
 	# Image Rule Assets
@@ -58,6 +60,8 @@ class ChaoGuiWangAssets:
 	# 打完鬼王后卡片右侧的「击败奖励结算中」文字，出现期间不能召唤/挑战；
 	# 一条规则的大搜索区同时覆盖「自己发现」(y≈170) 与「好友发现」(y≈410) 两处位置
 	I_CGW_REWARD_SETTLING = RuleImage(roi_front=(144,416,162,26), roi_back=(120,150,200,310), threshold=0.8, method="Template matching", file="./tasks/ChaoGuiWang/cgw/cgw_reward_settling.png")
+	# 战斗界面左上角 BOSS 头像下方的「已标记」标签，42x16 紧裁只保留三字本体，不含头像、等级菱形、回合数球与用户标注红框；四张已标记截图 0.9932~1.0000，三张未标记截图 0.2053~0.2205
+	I_CGW_BOSS_MARKED = RuleImage(roi_front=(383,44,42,16), roi_back=(360,28,95,46), threshold=0.8, method="Template matching", file="./tasks/ChaoGuiWang/cgw/cgw_boss_marked.png")
 
 
 	# Ocr Rule Assets

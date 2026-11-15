@@ -106,5 +106,14 @@
     "method": "Template matching",
     "threshold": 0.8,
     "description": "「击败奖励结算中」文字，出现期间不能召唤/挑战鬼王；大搜索区同时覆盖自己发现卡片(y≈170)与好友发现卡片(y≈410)。三张结算样本 0.8934/0.9295/1.0000，其它界面最高 0.3176"
+  },
+  {
+    "itemName": "cgw_boss_marked",
+    "imageName": "cgw_boss_marked.png",
+    "roiFront": "383,44,42,16",
+    "roiBack": "360,28,95,46",
+    "method": "Template matching",
+    "threshold": 0.8,
+    "description": "战斗界面左上角 BOSS 头像下方的「已标记」标签，42x16 紧裁只保留三字本体，不含头像、等级菱形、回合数球与用户标注红框；四张已标记截图 0.9932~1.0000，三张未标记截图 0.2053~0.2205"
   }
 ]
